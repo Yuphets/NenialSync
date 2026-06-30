@@ -68,4 +68,30 @@ class AccessAndDeviceTest extends TestCase
 
         $this->assertEqualsWithDelta($original * 2, $calculator->calculate($employee)['sss'], .01);
     }
+
+    public function test_assistant_can_select_employee_payroll_deductions(): void
+    {
+        $assistant = User::where('role', 'assistant')->first();
+        $employee = Employee::first();
+        $payload = [
+            'employee_number' => $employee->employee_number,
+            'name' => $employee->name,
+            'job_title' => $employee->job_title,
+            'weekly_salary' => $employee->weekly_salary,
+            'incentive' => $employee->incentive,
+            'overtime_hourly_rate' => $employee->overtime_hourly_rate,
+            'overtime_hours' => $employee->overtime_hours,
+            'deduction_plan' => ['pagibig'],
+            'face_subject_id' => $employee->face_subject_id,
+        ];
+
+        $this->actingAs($assistant)->putJson("/api/employees/{$employee->id}", $payload)
+            ->assertOk()
+            ->assertJsonPath('deduction_plan.0', 'pagibig');
+
+        $calculation = app(PayrollCalculator::class)->calculate($employee->fresh());
+        $this->assertSame(0.0, $calculation['sss']);
+        $this->assertGreaterThan(0, $calculation['pagibig']);
+        $this->assertSame(0.0, $calculation['philhealth']);
+    }
 }

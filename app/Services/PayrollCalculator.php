@@ -10,7 +10,7 @@ class PayrollCalculator
     public function calculate(Employee $employee): array
     {
         $monthly = (float) $employee->weekly_salary * 52 / 12;
-        $selected = $employee->deduction_plan ?: ['sss', 'pagibig', 'philhealth'];
+        $selected = $employee->deduction_plan ?? ['sss', 'pagibig', 'philhealth'];
         $sssRules = $this->rules('sss', ['employee_rate' => .05, 'min_credit' => 5000, 'max_credit' => 35000]);
         $pagibigRules = $this->rules('pagibig', ['employee_rate' => .02, 'low_income_rate' => .01, 'low_income_ceiling' => 1500, 'max_salary' => 10000]);
         $philhealthRules = $this->rules('philhealth', ['total_rate' => .05, 'employee_share' => .5, 'min_salary' => 10000, 'max_salary' => 100000]);
