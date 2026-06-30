@@ -47,6 +47,11 @@
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
+        "vercel": [
+            "@php scripts/vercel-check.php",
+            "@php artisan migrate --force",
+            "@php artisan app:seed-if-empty"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"
