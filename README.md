@@ -111,6 +111,8 @@ SESSION_SECURE_COOKIE=true
 
 You may replace the individual `DB_*` values with Neon's pooled `DATABASE_URL`. Nenial recognizes both the current `DATABASE_URL` variable and the legacy Vercel `POSTGRES_URL` variable automatically. During deployment, the Composer `vercel` script validates `APP_KEY` and the database configuration, applies pending migrations, and seeds only a completely new installation. Configuration mistakes therefore fail the deployment build with a useful message instead of producing a generic HTTP 500.
 
+The application also derives Neon's `ep-...` endpoint ID from pooled hostnames and supplies it to libpq. This keeps Neon connections compatible with Vercel PHP runtimes whose bundled PostgreSQL client cannot send TLS SNI. `DB_ENDPOINT` is available as an explicit override but is normally unnecessary.
+
 Generate `APP_KEY` locally with `php artisan key:generate --show`. Deploy with the Vercel Git integration or `vercel --prod`. Vercel uses a read-only filesystem; durable uploads must use S3/R2/Vercel Blob rather than Laravel's local disk.
 
 ## Initial accounts
