@@ -88,6 +88,8 @@ The repository includes `vercel.json`, `api/index.php`, serverless `/tmp` storag
 
 Laravel trusts Vercel's forwarding proxy headers so Vite assets are generated with HTTPS URLs. Keep `APP_URL` set to the final `https://` production domain.
 
+The PHP entry point also normalizes its script path to `/index.php`. This is required because Laravel is mounted at the domain root even though Vercel stores the function under `/api`; without it, Symfony would strip the `/api` prefix from application API routes.
+
 Required Vercel environment variables:
 
 ```dotenv
