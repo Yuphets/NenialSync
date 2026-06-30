@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use App\Services\LocalSyncService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 
@@ -17,3 +18,10 @@ Artisan::command('app:seed-if-empty', function () {
 
     $this->call('db:seed', ['--force' => true]);
 })->purpose('Seed a newly migrated Nenial database without modifying an existing installation');
+
+Artisan::command('local:sync', function (LocalSyncService $sync) {
+    $result = $sync->run();
+    $this->line(json_encode($result, JSON_PRETTY_PRINT));
+
+    return $result['online'] && $result['conflicts'] === 0 ? 0 : 1;
+})->purpose('Synchronize the store-local outbox and inventory with the cloud');

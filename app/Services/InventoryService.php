@@ -14,6 +14,8 @@ use Illuminate\Validation\ValidationException;
 
 class InventoryService
 {
+    public function __construct(private readonly OfflineOutboxService $outbox) {}
+
     public function adjust(Product $product, int $quantityDelta, int $reservedDelta, string $type, ?User $actor, ?string $reason = null, mixed $reference = null): Product
     {
         return DB::transaction(function () use ($product, $quantityDelta, $reservedDelta, $type, $actor, $reason, $reference) {
@@ -44,6 +46,8 @@ class InventoryService
     public function completeSale(User $cashier, array $lines, string $paymentMethod, float $saleDiscount, string $idempotencyKey): Sale
     {
         if ($existing = Sale::with('items', 'cashier')->where('idempotency_key', $idempotencyKey)->first()) {
+            $this->outbox->queueSale($existing);
+
             return $existing;
         }
 
@@ -68,6 +72,51 @@ class InventoryService
                 $this->moveLocked($product, -$item['quantity'], 0, 'sale', $cashier, 'POS sale', $sale);
             }
             $this->audit($cashier, 'sale.completed', $sale, null, $sale->load('items')->toArray());
+            $this->outbox->queueSale($sale);
+
+            return $sale->load('items', 'cashier');
+        }, 3);
+    }
+
+    public function importOfflineSale(User $cashier, array $payload, string $idempotencyKey, string $nodeId): Sale
+    {
+        if ($existing = Sale::with('items', 'cashier')->where('idempotency_key', $idempotencyKey)->first()) {
+            return $existing;
+        }
+
+        return DB::transaction(function () use ($cashier, $payload, $idempotencyKey, $nodeId) {
+            $skus = collect($payload['items'])->pluck('sku')->unique()->sort()->values();
+            $products = Product::query()->whereIn('sku', $skus)->where('is_active', true)->orderBy('sku')->lockForUpdate()->get()->keyBy('sku');
+            if ($products->count() !== $skus->count()) {
+                throw ValidationException::withMessages(['items' => 'One or more offline-sale products no longer exist in cloud inventory.']);
+            }
+
+            $sale = Sale::create([
+                'reference' => 'OFF-'.Str::upper(Str::slug($nodeId)).'-'.Str::upper(Str::random(8)),
+                'local_reference' => $payload['reference'],
+                'source_node_id' => $nodeId,
+                'idempotency_key' => $idempotencyKey,
+                'cashier_id' => $cashier->id,
+                'channel' => 'offline_pos',
+                'payment_method' => $payload['payment_method'],
+                'status' => 'completed',
+                'subtotal' => $payload['subtotal'],
+                'discount_total' => $payload['discount_total'],
+                'total' => $payload['total'],
+                'completed_at' => $payload['completed_at'],
+                'synced_at' => now(),
+            ]);
+
+            foreach ($payload['items'] as $line) {
+                $product = $products[$line['sku']];
+                if ($product->available_quantity < $line['quantity']) {
+                    throw ValidationException::withMessages(['inventory' => "Offline conflict: only {$product->available_quantity} {$product->unit} of {$product->name} remain in cloud inventory."]);
+                }
+                $sale->items()->create([...$line, 'product_id' => $product->id]);
+                $this->moveLocked($product, -$line['quantity'], 0, 'offline_sale_sync', $cashier, "Offline sale from {$nodeId}", $sale);
+            }
+
+            $this->audit($cashier, 'sale.offline_synced', $sale, null, $sale->load('items')->toArray(), ['node_id' => $nodeId]);
 
             return $sale->load('items', 'cashier');
         }, 3);

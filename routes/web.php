@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CloudSyncController;
+use App\Http\Controllers\LocalSyncController;
 use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\ProductController;
 use Illuminate\Support\Facades\Route;
@@ -10,6 +12,11 @@ Route::prefix('api')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
     Route::post('/device/attendance', [OperationsController::class, 'deviceAttendance'])->middleware(['device', 'throttle:120,1']);
+    Route::middleware(['sync', 'throttle:240,1'])->group(function () {
+        Route::get('/sync/products', [CloudSyncController::class, 'products']);
+        Route::post('/sync/sales', [CloudSyncController::class, 'sale']);
+        Route::post('/sync/attendance', [CloudSyncController::class, 'attendance']);
+    });
 
     Route::middleware('auth')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
@@ -45,6 +52,8 @@ Route::prefix('api')->group(function () {
         Route::get('/payroll/preview', [OperationsController::class, 'payrollPreview'])->middleware('role:admin,assistant');
         Route::post('/payroll/runs', [OperationsController::class, 'payrollRun'])->middleware('role:admin,assistant');
         Route::get('/reports', [OperationsController::class, 'report'])->middleware('role:admin,assistant');
+        Route::get('/local-sync/status', [LocalSyncController::class, 'status'])->middleware('role:admin,assistant');
+        Route::post('/local-sync/run', [LocalSyncController::class, 'run'])->middleware('role:admin,assistant');
     });
 });
 

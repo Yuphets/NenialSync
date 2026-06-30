@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Models\Sale;
 use App\Models\User;
 use App\Services\InventoryService;
+use App\Services\OfflineOutboxService;
 use App\Services\PayrollCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -134,12 +135,17 @@ class OperationsController extends Controller
         return $q->paginate(100);
     }
 
-    public function attendanceStore(Request $r)
+    public function attendanceStore(Request $r, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin', 403);
         $d = $r->validate(['employee_id' => 'required|exists:employees,id', 'attendance_date' => 'required|date', 'status' => 'required|in:present,absent,half_day,leave', 'recognized_at' => 'nullable|date', 'match_confidence' => 'nullable|numeric|min:0|max:100']);
 
-        return AttendanceRecord::updateOrCreate(['employee_id' => $d['employee_id'], 'attendance_date' => $d['attendance_date']], $d);
+        return DB::transaction(function () use ($d, $outbox) {
+            $record = AttendanceRecord::updateOrCreate(['employee_id' => $d['employee_id'], 'attendance_date' => $d['attendance_date']], $d);
+            $outbox->queueAttendance($record);
+
+            return $record;
+        });
     }
 
     public function payrollPreview(PayrollCalculator $calc)
@@ -214,14 +220,19 @@ class OperationsController extends Controller
         return response()->json(['device' => $device, 'token' => $token], 201);
     }
 
-    public function deviceAttendance(Request $r)
+    public function deviceAttendance(Request $r, OfflineOutboxService $outbox)
     {
         $device = $r->attributes->get('device');
         abort_unless($device->type === 'facial', 422);
         $d = $r->validate(['subject_id' => 'required|string', 'event_id' => 'required|string', 'recognized_at' => 'required|date', 'confidence' => 'required|numeric|min:0|max:100', 'status' => 'nullable|in:present,half_day']);
         $employee = Employee::where('face_subject_id', $d['subject_id'])->where('is_active', true)->firstOrFail();
         $at = Carbon::parse($d['recognized_at']);
-        $record = AttendanceRecord::updateOrCreate(['employee_id' => $employee->id, 'attendance_date' => $at->toDateString()], ['device_id' => $device->id, 'status' => $d['status'] ?? 'present', 'recognized_at' => $at, 'match_confidence' => $d['confidence'], 'provider_event_id' => $d['event_id'], 'metadata' => $r->except(['subject_id'])]);
+        $record = DB::transaction(function () use ($employee, $at, $d, $r, $device, $outbox) {
+            $record = AttendanceRecord::updateOrCreate(['employee_id' => $employee->id, 'attendance_date' => $at->toDateString()], ['device_id' => $device->id, 'status' => $d['status'] ?? 'present', 'recognized_at' => $at, 'match_confidence' => $d['confidence'], 'provider_event_id' => $d['event_id'], 'metadata' => $r->except(['subject_id'])]);
+            $outbox->queueAttendance($record);
+
+            return $record;
+        });
 
         return response()->json($record, 201);
     }

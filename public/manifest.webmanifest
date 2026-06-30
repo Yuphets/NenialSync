@@ -1,0 +1,11 @@
+{
+  "name": "Nenial Store Operations",
+  "short_name": "Nenial POS",
+  "start_url": "/app/pos",
+  "display": "standalone",
+  "background_color": "#f3f6f4",
+  "theme_color": "#176b43",
+  "icons": [
+    { "src": "/media/Nenial.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable" }
+  ]
+}

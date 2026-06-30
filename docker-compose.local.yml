@@ -1,0 +1,64 @@
+x-app-env: &app-env
+  APP_NAME: Nenial Local
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_KEY: ${APP_KEY}
+  APP_URL: ${LOCAL_APP_URL:-http://localhost:8080}
+  APP_TIMEZONE: Asia/Manila
+  LOG_CHANNEL: stderr
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_DATABASE: nenial_local
+  DB_USERNAME: nenial
+  DB_PASSWORD: ${LOCAL_DB_PASSWORD:-nenial-local-change-me}
+  SESSION_DRIVER: database
+  CACHE_STORE: database
+  QUEUE_CONNECTION: database
+  LOCAL_OFFLINE_MODE: "true"
+  LOCAL_NODE_ID: ${LOCAL_NODE_ID:-store-main}
+  CLOUD_URL: ${CLOUD_URL:-https://nenialsync.vercel.app}
+  SYNC_SHARED_SECRET: ${SYNC_SHARED_SECRET}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nenial_local
+      POSTGRES_USER: nenial
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:-nenial-local-change-me}
+    volumes:
+      - nenial-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nenial -d nenial_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+  sync:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      app:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while true; do php artisan local:sync || true; sleep 30; done"]
+
+volumes:
+  nenial-postgres:

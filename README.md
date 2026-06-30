@@ -111,6 +111,7 @@ SESSION_DRIVER=database
 CACHE_STORE=database
 QUEUE_CONNECTION=database
 SESSION_SECURE_COOKIE=true
+SYNC_SHARED_SECRET=<64-character-random-secret>
 ```
 
 You may replace the individual `DB_*` values with Neon's pooled `DATABASE_URL`. Nenial recognizes both the current `DATABASE_URL` variable and the legacy Vercel `POSTGRES_URL` variable automatically. During deployment, the Composer `vercel` script validates `APP_KEY` and the database configuration, applies pending migrations, and seeds only a completely new installation. Configuration mistakes therefore fail the deployment build with a useful message instead of producing a generic HTTP 500.
@@ -140,6 +141,60 @@ Seeder passwords are controlled by `SEED_*_PASSWORD` environment variables. Chan
 6. Use the built-in camera scanner only as a fallback and grant browser camera permission over HTTPS.
 
 Test ten repeated scans before opening the register. A scan must resolve exactly one SKU and must never add beyond `available_quantity`.
+
+## Offline-capable store server
+
+The cloud deployment remains the online storefront and reporting authority. A store-local Laravel/PostgreSQL node serves the counter over the LAN, so POS sales, barcode lookup, login, inventory deduction, and facial-attendance capture continue when the internet connection is down.
+
+### One-time cloud configuration
+
+Generate a long random synchronization secret and add it to the Vercel Production environment as `SYNC_SHARED_SECRET`, then redeploy. Keep this value out of Git and use the same value on the local server.
+
+```powershell
+php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
+```
+
+### Start the local node
+
+Install Docker Desktop on the store server, give that computer a reserved/static LAN address, and set these values in its private `.env`:
+
+```dotenv
+APP_KEY=base64:generate-a-separate-local-key
+LOCAL_APP_URL=http://192.168.1.20:8080
+LOCAL_DB_PASSWORD=use-a-long-random-password
+LOCAL_NODE_ID=store-main
+CLOUD_URL=https://nenialsync.vercel.app
+SYNC_SHARED_SECRET=the-same-secret-configured-in-vercel
+```
+
+Start the local PostgreSQL database, Laravel application, and 30-second synchronization worker:
+
+```powershell
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+Point counter devices to `http://192.168.1.20:8080` (replace the address with the server's reserved LAN IP). Allow TCP port 8080 through the server firewall only for the trusted store network. Use a UPS and back up the `nenial-postgres` Docker volume regularly.
+
+For an installable PWA on devices other than the server itself, put a trusted HTTPS reverse proxy in front of the LAN address. Browsers permit service workers on HTTPS origins and on `localhost`, but not ordinary HTTP LAN addresses.
+
+### Synchronization behavior
+
+- A local sale and its outbox event commit in the same PostgreSQL transaction.
+- The worker pushes original prices, timestamps, cashier identity, and line items with a UUID idempotency key.
+- Cloud imports lock inventory rows and can apply each event only once.
+- Attendance events use the same durable outbox.
+- Cloud inventory is pulled only after every pending local event is accepted.
+- If online orders consumed stock while the store was offline, the event is retained as an open conflict. Cloud inventory is not copied over the unresolved local state.
+- Admin and Assistant Admin can see pending events, conflicts, and the last successful sync under **Settings** and trigger a manual sync.
+
+Resolve a conflict by reviewing the physical count and cloud order commitments, making the authorized inventory correction in the cloud workspace, then retrying synchronization. Never delete the local outbox or Docker volume to bypass a conflict.
+
+Manual synchronization and status checks:
+
+```powershell
+docker compose -f docker-compose.local.yml exec app php artisan local:sync
+docker compose -f docker-compose.local.yml logs -f sync
+```
 
 ## Facial-recognition terminal setup
 
