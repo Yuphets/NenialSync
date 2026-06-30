@@ -1,0 +1,7 @@
+/node_modules
+/vendor
+/legacy
+/storage/logs/*
+/.env
+/tests
+/database/*.sqlite

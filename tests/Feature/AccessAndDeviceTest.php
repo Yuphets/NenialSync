@@ -1,0 +1,71 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Device;
+use App\Models\Employee;
+use App\Models\User;
+use App\Services\PayrollCalculator;
+use Database\Seeders\DatabaseSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+class AccessAndDeviceTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(DatabaseSeeder::class);
+    }
+
+    public function test_customer_cannot_adjust_inventory(): void
+    {
+        $customer = User::where('role', 'user')->first();
+        $this->actingAs($customer)->postJson('/api/products/1/adjust', ['quantity_delta' => 1, 'reason' => 'test'])->assertForbidden();
+    }
+
+    public function test_facial_device_can_record_attendance(): void
+    {
+        $token = Str::random(64);
+        $device = Device::create(['name' => 'Gate', 'type' => 'facial', 'token_hash' => hash('sha256', $token), 'is_active' => true]);
+        $employee = Employee::first();
+        $this->withToken($token)->postJson('/api/device/attendance', ['subject_id' => $employee->face_subject_id, 'event_id' => 'evt-001', 'recognized_at' => now()->toIso8601String(), 'confidence' => 98.4])->assertCreated();
+        $this->assertDatabaseHas('attendance_records', ['employee_id' => $employee->id, 'device_id' => $device->id, 'status' => 'present']);
+    }
+
+    public function test_only_admin_can_list_devices(): void
+    {
+        $assistant = User::where('role', 'assistant')->first();
+        $this->actingAs($assistant)->getJson('/api/devices')->assertForbidden();
+    }
+
+    public function test_logout_returns_the_rotated_csrf_token(): void
+    {
+        $admin = User::where('role', 'admin')->first();
+
+        $this->actingAs($admin)->postJson('/api/auth/logout')
+            ->assertOk()
+            ->assertJsonStructure(['csrf_token']);
+    }
+
+    public function test_payroll_uses_the_latest_effective_statutory_rate(): void
+    {
+        $employee = Employee::first();
+        $calculator = app(PayrollCalculator::class);
+        $original = $calculator->calculate($employee)['sss'];
+
+        DB::table('statutory_rates')->insert([
+            'code' => 'sss',
+            'effective_from' => today(),
+            'rules' => json_encode(['employee_rate' => .10, 'min_credit' => 5000, 'max_credit' => 35000]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->assertEqualsWithDelta($original * 2, $calculator->calculate($employee)['sss'], .01);
+    }
+}
