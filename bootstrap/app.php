@@ -13,6 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Vercel terminates TLS before forwarding requests to the PHP function.
+        // Trust its forwarding headers so generated Vite asset URLs remain HTTPS.
+        $middleware->trustProxies(at: '*');
         $middleware->alias(['role' => EnsureRole::class, 'device' => AuthenticateDevice::class]);
         $middleware->validateCsrfTokens(except: ['api/device/*']);
     })

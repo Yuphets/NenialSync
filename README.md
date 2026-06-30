@@ -86,6 +86,8 @@ Never run destructive migrations automatically during a Vercel request.
 
 The repository includes `vercel.json`, `api/index.php`, serverless `/tmp` storage setup, and `.vercelignore`.
 
+Laravel trusts Vercel's forwarding proxy headers so Vite assets are generated with HTTPS URLs. Keep `APP_URL` set to the final `https://` production domain.
+
 Required Vercel environment variables:
 
 ```dotenv
