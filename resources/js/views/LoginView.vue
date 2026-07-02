@@ -7,7 +7,7 @@ import { useAuthStore } from '../stores/auth';
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const mode = ref('login');
+const mode = ref(route.query.mode === 'register' ? 'register' : 'login');
 const busy = ref(false);
 const error = ref('');
 const result = ref('');
