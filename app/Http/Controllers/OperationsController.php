@@ -11,6 +11,7 @@ use App\Models\PayrollRun;
 use App\Models\PasswordResetTicket;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\SyncState;
 use App\Models\User;
 use App\Services\InventoryService;
 use App\Services\OfflineOutboxService;
@@ -38,7 +39,15 @@ class OperationsController extends Controller
             ];
         }
 
-        return ['products' => Product::count(), 'low_stock' => Product::get()->where('is_low_stock', true)->count(), 'sales_today' => (float) Sale::whereDate('completed_at', today())->sum('total'), 'orders_pending' => Order::whereIn('status', ['preparing', 'dispatched', 'delivered'])->count(), 'employees' => Employee::where('is_active', true)->count(), 'latest_movements' => DB::table('inventory_movements')->latest()->limit(12)->get()];
+        $movements = DB::table('inventory_movements')->latest()->limit(12)->get();
+        if (config('offline.enabled')) {
+            $cloudActivity = SyncState::where('key', 'cloud_inventory_activity')->first();
+            if ($cloudActivity) {
+                $movements = collect(data_get($cloudActivity->value, 'movements', []))->take(12)->values();
+            }
+        }
+
+        return ['products' => Product::count(), 'low_stock' => Product::get()->where('is_low_stock', true)->count(), 'sales_today' => (float) Sale::whereDate('completed_at', today())->sum('total'), 'orders_pending' => Order::whereIn('status', ['preparing', 'dispatched', 'delivered'])->count(), 'employees' => Employee::where('is_active', true)->count(), 'latest_movements' => $movements];
     }
 
     public function pos(Request $r, InventoryService $s)

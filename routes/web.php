@@ -16,6 +16,7 @@ Route::prefix('api')->group(function () {
     Route::get('/device/employees', [OperationsController::class, 'deviceEmployees'])->middleware(['device', 'throttle:60,1']);
     Route::middleware(['sync', 'throttle:240,1'])->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
+        Route::get('/sync/inventory-activity', [CloudSyncController::class, 'inventoryActivity']);
         Route::get('/sync/configuration', [CloudSyncController::class, 'configuration']);
         Route::post('/sync/sales', [CloudSyncController::class, 'sale']);
         Route::post('/sync/attendance', [CloudSyncController::class, 'attendance']);

@@ -24,7 +24,7 @@ class AccessAndDeviceTest extends TestCase
 
     public function test_customer_cannot_adjust_inventory(): void
     {
-        $customer = User::where('role', 'user')->first();
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
         $this->actingAs($customer)->postJson('/api/products/1/adjust', ['quantity_delta' => 1, 'reason' => 'test'])->assertForbidden();
     }
 

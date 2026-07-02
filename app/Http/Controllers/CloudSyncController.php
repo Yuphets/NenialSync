@@ -20,6 +20,18 @@ class CloudSyncController extends Controller
         return Product::withTrashed()->orderBy('sku')->get();
     }
 
+    public function inventoryActivity()
+    {
+        return DB::table('inventory_movements')
+            ->latest()
+            ->limit(100)
+            ->get([
+                'id', 'product_id', 'type', 'quantity_delta', 'reserved_delta',
+                'stock_before', 'stock_after', 'reserved_before', 'reserved_after',
+                'reason', 'idempotency_key', 'created_at', 'updated_at',
+            ]);
+    }
+
     public function configuration()
     {
         return [

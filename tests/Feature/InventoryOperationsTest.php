@@ -32,7 +32,7 @@ class InventoryOperationsTest extends TestCase
 
     public function test_online_order_reserves_then_receipt_deducts_stock(): void
     {
-        $customer = User::where('role', 'user')->first();
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
         $product = Product::first();
         $before = $product->stock_quantity;
         $response = $this->actingAs($customer)->postJson('/api/orders', ['items' => [['product_id' => $product->id, 'quantity' => 3]], 'payment_method' => 'protected', 'idempotency_key' => (string) Str::uuid()])->assertCreated();

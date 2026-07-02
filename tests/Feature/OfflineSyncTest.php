@@ -88,6 +88,14 @@ class OfflineSyncTest extends TestCase
         Http::fake([
             'https://cloud.example/api/sync/sales' => Http::response(['id' => 99], 201),
             'https://cloud.example/api/sync/products' => Http::response(Product::all()->toArray()),
+            'https://cloud.example/api/sync/inventory-activity' => Http::response([[
+                'id' => 901, 'product_id' => $product->id, 'type' => 'sale',
+                'quantity_delta' => -1, 'reserved_delta' => 0,
+                'stock_before' => 180, 'stock_after' => 179,
+                'reserved_before' => 0, 'reserved_after' => 0,
+                'reason' => 'Cloud sale', 'idempotency_key' => (string) Str::uuid(),
+                'created_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(),
+            ]]),
             'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
         ]);
 
@@ -97,7 +105,8 @@ class OfflineSyncTest extends TestCase
         $this->assertSame(1, $result['synced_now']);
         $this->assertDatabaseHas('sync_outbox', ['event_id' => $eventId, 'status' => 'synced']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud']);
-        Http::assertSentCount(3);
+        $this->assertDatabaseHas('sync_states', ['key' => 'cloud_inventory_activity']);
+        Http::assertSentCount(4);
     }
 
     private function salePayload(Product $product, int $quantity): array

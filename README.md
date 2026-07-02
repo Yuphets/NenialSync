@@ -258,7 +258,7 @@ The webhook is idempotent by provider event ID and updates one attendance record
 
 - `protected_payment` currently implements the order hold, reservation, delivery, receipt, and settlement state machine. Connect a PCI-compliant provider such as your chosen Philippine payment gateway before collecting real card or wallet funds; never store card details in this application.
 - Facial matching occurs locally in the Nenial browser terminal or on a commercial vendor gateway. Browser templates stay on the terminal and are never synchronized to Neon.
-- Inventory screens synchronize every three seconds from Neon. PostgreSQL remains authoritative, so simultaneous POS and online purchases are serialized by row locks even if a screen has not refreshed yet.
+- Inventory screens synchronize every three seconds from their current server. The store-local worker refreshes cloud product totals and the latest inventory activity ledger every 30 seconds, so `localhost`, LAN devices, and Vercel show the same authoritative activity after synchronization. PostgreSQL remains authoritative, so simultaneous POS and online purchases are serialized by row locks even if a screen has not refreshed yet.
 
 ## Verification
 

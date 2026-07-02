@@ -42,7 +42,7 @@ class TaxPasswordAndTerminalTest extends TestCase
     {
         $admin = User::where('role', 'admin')->first();
         $admin->update(['password' => 'AdminCurrent2026!']);
-        $customer = User::where('role', 'user')->first();
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
         $ticket = $this->postJson('/api/auth/password-tickets', ['email' => $customer->email, 'reason' => 'Forgot password'])
             ->assertAccepted()->json('ticket_number');
         $ticketId = \App\Models\PasswordResetTicket::where('ticket_number', $ticket)->value('id');

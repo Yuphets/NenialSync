@@ -1,11 +1,30 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import axios from 'axios';
 import PageHeader from '../components/PageHeader.vue';
 import { useAuthStore } from '../stores/auth';
 const auth = useAuthStore();
 const data = ref({});
-onMounted(async () => { data.value = (await axios.get('/api/dashboard')).data; });
+let refreshTimer;
+let loading = false;
+
+async function load() {
+    if (loading) return;
+    loading = true;
+    try {
+        data.value = (await axios.get('/api/dashboard')).data;
+    } catch {
+        // Keep the last good snapshot visible during a brief connection loss.
+    } finally {
+        loading = false;
+    }
+}
+
+onMounted(() => {
+    load();
+    refreshTimer = window.setInterval(load, 3000);
+});
+onBeforeUnmount(() => window.clearInterval(refreshTimer));
 </script>
 
 <template>

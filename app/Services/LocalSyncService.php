@@ -60,6 +60,9 @@ class LocalSyncService
             return $this->status(false, $synced, $conflicts, $products->body());
         }
 
+        $activity = $this->client()->get($this->url('/api/sync/inventory-activity'));
+        $activitySync = $activity->successful();
+
         try {
             $configuration = $this->client()->get($this->url('/api/sync/configuration'));
             $accountSync = $configuration->successful();
@@ -82,9 +85,18 @@ class LocalSyncService
             if ($accountSync) $this->applyConfiguration($configuration->json());
         });
 
-        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync], 'last_synced_at' => now()]);
+        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'activity_synced' => $activitySync], 'last_synced_at' => now()]);
+        if ($activitySync) {
+            SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
+        }
 
-        return $this->status(true, $synced, $conflicts, $accountSync ? null : 'Inventory synced. Deploy the latest cloud release to enable account and workforce synchronization.');
+        $message = match (true) {
+            ! $accountSync => 'Inventory synced. Deploy the latest cloud release to enable account and workforce synchronization.',
+            ! $activitySync => 'Inventory totals synced. Deploy the latest cloud release to enable the shared activity feed.',
+            default => null,
+        };
+
+        return $this->status(true, $synced, $conflicts, $message);
     }
 
     public function status(bool $online = true, int $synced = 0, int $conflicts = 0, ?string $message = null): array
@@ -99,6 +111,7 @@ class LocalSyncService
             'conflicts_now' => $conflicts,
             'last_synced_at' => SyncState::where('key', 'cloud')->value('last_synced_at'),
             'accounts_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'accounts_synced', false),
+            'activity_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'activity_synced', false),
             'message' => $message,
         ];
     }
