@@ -192,6 +192,7 @@ class LocalSyncService
                 'name' => $remote['name'], 'password' => $remote['password_hash'], 'role' => $remote['role'],
                 'is_active' => $remote['is_active'], 'password_changed_at' => $remote['password_changed_at'],
                 'must_change_password' => $remote['must_change_password'] ?? false,
+                'email_verified_at' => $remote['email_verified_at'] ?? null, 'google_id' => $remote['google_id'] ?? null, 'avatar_url' => $remote['avatar_url'] ?? null,
             ])->save();
         }
         foreach ($configuration['employees'] ?? [] as $remote) {
@@ -246,14 +247,15 @@ class LocalSyncService
                 $deviceId = Device::where('name', $remote['device_name'])->where('type', $remote['device_type'])->value('id');
             }
 
-            AttendanceRecord::updateOrCreate(
-                ['employee_id' => $employeeId, 'attendance_date' => $remote['attendance_date']],
-                [
+            $record = AttendanceRecord::where('employee_id', $employeeId)->whereDate('attendance_date', $remote['attendance_date'])->first();
+            if (! $record) {
+                AttendanceRecord::create([
+                    'employee_id' => $employeeId, 'attendance_date' => $remote['attendance_date'],
                     'device_id' => $deviceId, 'status' => $remote['status'],
                     'recognized_at' => $remote['recognized_at'], 'match_confidence' => $remote['match_confidence'],
                     'provider_event_id' => $remote['provider_event_id'], 'metadata' => $remote['metadata'],
-                ]
-            );
+                ]);
+            }
         }
     }
 }

@@ -10,7 +10,7 @@ class PasswordResetTicket extends Model
 
     protected function casts(): array
     {
-        return ['requested_at' => 'datetime', 'resolved_at' => 'datetime'];
+        return ['requested_at' => 'datetime', 'resolved_at' => 'datetime', 'temporary_password' => 'encrypted', 'temporary_password_viewed_at' => 'datetime'];
     }
 
     public function user()

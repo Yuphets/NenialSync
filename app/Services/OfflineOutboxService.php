@@ -74,6 +74,9 @@ class OfflineOutboxService
             'is_active' => $user->is_active,
             'password_changed_at' => $user->password_changed_at?->toIso8601String(),
             'must_change_password' => $user->must_change_password,
+            'email_verified_at' => $user->email_verified_at?->toIso8601String(),
+            'google_id' => $user->google_id,
+            'avatar_url' => $user->avatar_url,
         ]);
     }
 

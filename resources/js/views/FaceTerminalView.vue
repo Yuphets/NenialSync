@@ -275,10 +275,10 @@ async function submitAttendance(profile, confidence) {
     try {
         const eventId = crypto.randomUUID();
         const { data } = await axios.post('/api/device/attendance', { subject_id: profile.subject_id, event_id: eventId, recognized_at: new Date().toISOString(), confidence: Number(confidence.toFixed(2)), status: 'present' }, { headers: { Authorization: `Bearer ${token.value}` } });
-        lastResult.value = { name: profile.employee_name, time: new Date(data.recognized_at).toLocaleString('en-US'), confidence: confidence.toFixed(1) };
+        lastResult.value = { name: profile.employee_name, time: new Date(data.recognized_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }), confidence: Number(data.match_confidence || confidence).toFixed(1) };
         lastSubmitted.set(profile.subject_id, Date.now());
-        status.value = `Attendance recorded for ${profile.employee_name}.`;
-        livenessUi.value = { visible: true, title: 'Attendance recorded', instruction: `${profile.employee_name} may step away.`, progress: 100 };
+        status.value = data.already_recorded ? `${profile.employee_name} already timed in today.` : `Attendance recorded for ${profile.employee_name}.`;
+        livenessUi.value = { visible: true, title: data.already_recorded ? 'Already timed in' : 'Attendance recorded', instruction: `${profile.employee_name} may step away.`, progress: 100 };
         liveness = null;
         await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (error) { status.value = error.response?.data?.message || 'Attendance submission failed; the terminal will keep running.'; } finally { busy.value = false; }

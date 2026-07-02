@@ -101,7 +101,7 @@ function formatAttendanceDate(record) {
     if (Number.isNaN(date.getTime())) return record.attendance_date;
     return date.toLocaleString('en-US', {
         month: '2-digit', day: '2-digit', year: 'numeric',
-        hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
+        hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Asia/Manila',
     });
 }
 
@@ -117,8 +117,13 @@ function period() {
 }
 
 async function run() {
-    await axios.post('/api/payroll/runs', period());
-    message.value = 'Payroll finalized.';
+    if (!confirm('Finalize this payroll period? This saves an immutable snapshot in Reports and prevents another run for the same dates.')) return;
+    try {
+        await axios.post('/api/payroll/runs', period());
+        message.value = 'Payroll finalized. The snapshot is now available in Reports.';
+    } catch (error) {
+        message.value = error.response?.data?.message || 'Unable to finalize this payroll period.';
+    }
 }
 
 async function downloadPayroll() {

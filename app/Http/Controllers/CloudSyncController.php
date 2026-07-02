@@ -83,6 +83,7 @@ class CloudSyncController extends Controller
                 'password_hash' => $user->getRawOriginal('password'), 'role' => $user->role,
                 'is_active' => $user->is_active, 'password_changed_at' => $user->password_changed_at?->toIso8601String(),
                 'must_change_password' => $user->must_change_password,
+                'email_verified_at' => $user->email_verified_at?->toIso8601String(), 'google_id' => $user->google_id, 'avatar_url' => $user->avatar_url,
             ]),
             'employees' => Employee::withTrashed()->with('user:id,email')->orderBy('employee_number')->get()->map(fn (Employee $employee) => [
                 ...$employee->only(['employee_number', 'name', 'job_title', 'weekly_salary', 'incentive', 'overtime_hourly_rate', 'overtime_hours', 'deduction_plan', 'face_subject_id', 'is_active']),
@@ -245,10 +246,12 @@ class CloudSyncController extends Controller
 
         $record = DB::transaction(function () use ($data) {
             $employee = Employee::where('employee_number', $data['payload']['employee_number'])->where('is_active', true)->firstOrFail();
-            $record = AttendanceRecord::updateOrCreate(
-                ['employee_id' => $employee->id, 'attendance_date' => $data['payload']['attendance_date']],
-                collect($data['payload'])->except('employee_number')->all()
-            );
+            $record = AttendanceRecord::where('employee_id', $employee->id)
+                ->whereDate('attendance_date', $data['payload']['attendance_date'])->first();
+            $record ??= AttendanceRecord::create([
+                'employee_id' => $employee->id,
+                ...collect($data['payload'])->except('employee_number')->all(),
+            ]);
             SyncReceipt::create([
                 'node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'attendance.recorded',
                 'result_type' => AttendanceRecord::class, 'result_id' => $record->id, 'received_at' => now(),
@@ -268,6 +271,7 @@ class CloudSyncController extends Controller
             'payload.password_hash' => 'required|string|max:255', 'payload.role' => 'required|in:admin,assistant,cashier,user',
             'payload.is_active' => 'required|boolean', 'payload.password_changed_at' => 'nullable|date',
             'payload.must_change_password' => 'required|boolean',
+            'payload.email_verified_at' => 'nullable|date', 'payload.google_id' => 'nullable|string|max:255', 'payload.avatar_url' => 'nullable|string|max:2048',
         ]);
         if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) return User::findOrFail($receipt->result_id);
         $user = DB::transaction(function () use ($data) {
@@ -277,6 +281,7 @@ class CloudSyncController extends Controller
                 'name' => $payload['name'], 'password' => $payload['password_hash'], 'role' => $payload['role'],
                 'is_active' => $payload['is_active'], 'password_changed_at' => $payload['password_changed_at'],
                 'must_change_password' => $payload['must_change_password'],
+                'email_verified_at' => $payload['email_verified_at'], 'google_id' => $payload['google_id'], 'avatar_url' => $payload['avatar_url'],
             ])->save();
             SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'user.account_updated', 'result_type' => User::class, 'result_id' => $user->id, 'received_at' => now()]);
             return $user;

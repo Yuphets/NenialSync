@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CloudSyncController;
 use App\Http\Controllers\LocalSyncController;
 use App\Http\Controllers\OperationsController;
+use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProductController;
 use Illuminate\Support\Facades\Route;
 
@@ -11,9 +12,15 @@ Route::prefix('api')->group(function () {
     Route::get('/storefront/products', [ProductController::class, 'index']);
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
+    Route::post('/auth/verify-email', [AuthController::class, 'verifyOtp'])->middleware('throttle:10,1');
+    Route::post('/auth/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:3,10');
     Route::post('/auth/password-tickets', [AuthController::class, 'passwordTicket'])->middleware('throttle:3,10');
+    Route::post('/auth/password-ticket-status', [AuthController::class, 'passwordTicketStatus'])->middleware('throttle:12,1');
     Route::post('/device/attendance', [OperationsController::class, 'deviceAttendance'])->middleware(['device', 'throttle:120,1']);
     Route::get('/device/employees', [OperationsController::class, 'deviceEmployees'])->middleware(['device', 'throttle:60,1']);
+    Route::post('/payments/webhooks/stripe', [PaymentController::class, 'stripe'])->middleware('throttle:240,1');
+    Route::post('/payments/webhooks/paymongo', [PaymentController::class, 'payMongo'])->middleware('throttle:240,1');
+    Route::post('/payments/webhooks/maya', [PaymentController::class, 'maya'])->middleware('throttle:240,1');
     Route::middleware(['sync', 'throttle:240,1'])->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
         Route::get('/sync/inventory-activity', [CloudSyncController::class, 'inventoryActivity']);
@@ -54,6 +61,7 @@ Route::prefix('api')->group(function () {
         Route::get('/sales', [OperationsController::class, 'sales'])->middleware('role:admin,assistant,cashier');
         Route::get('/orders', [OperationsController::class, 'orders']);
         Route::post('/orders', [OperationsController::class, 'placeOrder']);
+        Route::post('/orders/{order}/payment-checkout', [PaymentController::class, 'checkout'])->middleware('throttle:20,1');
         Route::put('/orders/{order}/status', [OperationsController::class, 'orderStatus']);
         Route::post('/orders/{order}/receive', [OperationsController::class, 'receive']);
         Route::post('/orders/{order}/cancel', [OperationsController::class, 'cancel']);
@@ -65,11 +73,15 @@ Route::prefix('api')->group(function () {
         Route::post('/attendance', [OperationsController::class, 'attendanceStore'])->middleware('role:admin');
         Route::get('/payroll/preview', [OperationsController::class, 'payrollPreview'])->middleware('role:admin,assistant');
         Route::post('/payroll/runs', [OperationsController::class, 'payrollRun'])->middleware('role:admin,assistant');
+        Route::get('/payroll/runs', [OperationsController::class, 'payrollRuns'])->middleware('role:admin,assistant');
         Route::get('/payroll/export', [OperationsController::class, 'payrollExport'])->middleware('role:admin,assistant');
         Route::get('/reports', [OperationsController::class, 'report'])->middleware('role:admin,assistant');
         Route::get('/local-sync/status', [LocalSyncController::class, 'status'])->middleware('role:admin,assistant');
         Route::post('/local-sync/run', [LocalSyncController::class, 'run'])->middleware('role:admin,assistant');
     });
 });
+
+Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])->middleware('throttle:20,1');
+Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])->middleware('throttle:20,1');
 
 Route::view('/{path?}', 'app')->where('path', '^(?!api).*$');

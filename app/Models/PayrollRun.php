@@ -17,4 +17,9 @@ class PayrollRun extends Model
     {
         return $this->hasMany(PayrollItem::class);
     }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }

@@ -169,7 +169,7 @@ class InventoryService
                 $product = Product::query()->lockForUpdate()->findOrFail($item->product_id);
                 $this->moveLocked($product, -$item->quantity, -$item->quantity, 'order_fulfilled', $customer, 'Customer confirmed receipt', $lockedOrder);
             }
-            $lockedOrder->update(['status' => 'received', 'payment_status' => 'paid', 'received_at' => now()]);
+            $lockedOrder->update(['status' => 'received', 'payment_status' => 'paid', 'paid_at' => $lockedOrder->paid_at ?: now(), 'received_at' => now()]);
             $this->audit($customer, 'order.received', $lockedOrder, null, $lockedOrder->fresh()->toArray());
             $this->outbox->queueOrderStatus($lockedOrder->fresh(), $customer);
 
@@ -183,6 +183,9 @@ class InventoryService
             $lockedOrder = Order::query()->with('items')->lockForUpdate()->findOrFail($order->id);
             if (! in_array($lockedOrder->status, ['preparing', 'dispatched'], true)) {
                 throw ValidationException::withMessages(['order' => 'This order can no longer be cancelled.']);
+            }
+            if ($lockedOrder->paid_at) {
+                throw ValidationException::withMessages(['order' => 'This paid order requires a provider refund before it can be cancelled.']);
             }
             foreach ($lockedOrder->items->sortBy('product_id') as $item) {
                 $product = Product::query()->lockForUpdate()->findOrFail($item->product_id);

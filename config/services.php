@@ -35,4 +35,27 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost'), '/').'/auth/google/callback'),
+    ],
+
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
+    'paymongo' => [
+        'secret' => env('PAYMONGO_SECRET_KEY'),
+        'webhook_secret' => env('PAYMONGO_WEBHOOK_SECRET'),
+    ],
+
+    'maya' => [
+        'public_key' => env('MAYA_PUBLIC_KEY'),
+        'secret_key' => env('MAYA_SECRET_KEY'),
+        'base_url' => env('MAYA_BASE_URL', 'https://pg-sandbox.paymaya.com'),
+        'webhook_secret' => env('MAYA_WEBHOOK_SECRET'),
+    ],
+
 ];

@@ -9,5 +9,5 @@ const routes=[
  ]}
 ];
 const router=createRouter({history:createWebHistory(),routes});
-router.beforeEach(async to=>{const auth=useAuthStore();if(!auth.ready)await auth.hydrate();if(to.meta.auth&&!auth.authenticated)return '/login';if(auth.authenticated&&auth.user.must_change_password&&to.path!=='/app/settings')return '/app/settings';const roles=to.meta.roles;if(roles&&!roles.includes(auth.role))return '/app/dashboard';if(to.path==='/login'&&auth.authenticated)return auth.user.must_change_password?'/app/settings':'/app/dashboard';});
+router.beforeEach(async to=>{const auth=useAuthStore();if(!auth.ready)await auth.hydrate();if(to.meta.auth&&!auth.authenticated)return '/login';if(auth.authenticated&&auth.user.must_change_password&&to.path!=='/app/settings')return '/app/settings';const roles=to.meta.roles;if(roles&&!roles.includes(auth.role))return auth.role==='user'?'/':'/app/dashboard';if(to.path==='/login'&&auth.authenticated)return auth.user.must_change_password?'/app/settings':(auth.role==='user'?'/':'/app/dashboard');});
 export default router;

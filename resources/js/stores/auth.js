@@ -6,7 +6,8 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     async hydrate(){ try { this.user=(await axios.get('/api/auth/me')).data.user; } catch { this.user=null; } finally { this.ready=true; } },
     async login(credentials){ this.user=(await axios.post('/api/auth/login',credentials)).data.user; },
-    async register(data){ this.user=(await axios.post('/api/auth/register',data)).data.user; },
+    async register(data){ return (await axios.post('/api/auth/register',data)).data; },
+    async verifyEmail(data){ this.user=(await axios.post('/api/auth/verify-email',data)).data.user; },
     async logout(){ const {data}=await axios.post('/api/auth/logout'); axios.defaults.headers.common['X-CSRF-TOKEN']=data.csrf_token; this.user=null; }
   }
 });

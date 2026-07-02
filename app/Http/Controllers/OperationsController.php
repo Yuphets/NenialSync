@@ -162,8 +162,11 @@ class OperationsController extends Controller
         $d = $r->validate(['employee_id' => 'required|exists:employees,id', 'attendance_date' => 'required|date', 'status' => 'required|in:present,absent,half_day,leave', 'recognized_at' => 'nullable|date', 'match_confidence' => 'nullable|numeric|min:0|max:100']);
 
         return DB::transaction(function () use ($d, $outbox) {
-            $record = AttendanceRecord::updateOrCreate(['employee_id' => $d['employee_id'], 'attendance_date' => $d['attendance_date']], $d);
-            $outbox->queueAttendance($record);
+            $record = AttendanceRecord::where('employee_id', $d['employee_id'])->whereDate('attendance_date', $d['attendance_date'])->first();
+            if (! $record) {
+                $record = AttendanceRecord::create($d);
+                $outbox->queueAttendance($record);
+            }
 
             return $record;
         });
@@ -178,6 +181,7 @@ class OperationsController extends Controller
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $d = $r->validate(['period_start' => 'required|date', 'period_end' => 'required|date|after_or_equal:period_start']);
+        abort_if(PayrollRun::whereDate('period_start', $d['period_start'])->whereDate('period_end', $d['period_end'])->exists(), 422, 'This payroll period was already finalized. View it in Reports.');
 
         return DB::transaction(function () use ($r, $d, $calc) {
             $run = PayrollRun::create(['reference' => 'PAY-'.now()->format('YmdHis'), 'period_start' => $d['period_start'], 'period_end' => $d['period_end'], 'status' => 'finalized', 'created_by' => $r->user()->id, 'finalized_at' => now()]);
@@ -188,6 +192,11 @@ class OperationsController extends Controller
 
             return $run->load('items.employee');
         });
+    }
+
+    public function payrollRuns()
+    {
+        return PayrollRun::with(['creator:id,name', 'items.employee:id,employee_number,name,job_title'])->latest('finalized_at')->paginate(25);
     }
 
     public function payrollExport(Request $r, PayrollCalculator $calc)
@@ -271,6 +280,7 @@ class OperationsController extends Controller
             ]);
             DB::table('sessions')->where('user_id', $user->id)->delete();
             $ticket->update(['status' => 'resolved', 'resolved_by' => $r->user()->id, 'resolved_at' => now()]);
+            $ticket->update(['temporary_password' => $data['password'], 'temporary_password_viewed_at' => null]);
             DB::table('audit_logs')->insert([
                 'actor_id' => $r->user()->id,
                 'action' => 'user.password_reset_by_admin',
@@ -293,7 +303,25 @@ class OperationsController extends Controller
         $to = $r->date('to') ?: now()->endOfMonth();
 
         $sales = Sale::whereBetween('completed_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
-        return ['range' => [$from, $to], 'sales' => ['total' => (float) (clone $sales)->sum('total'), 'vatable_sales' => (float) (clone $sales)->sum('vatable_sales'), 'vat_amount' => (float) (clone $sales)->sum('vat_amount'), 'count' => (clone $sales)->count()], 'inventory' => Product::orderBy('name')->get(), 'orders' => Order::whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])->selectRaw('status,count(*) as count,sum(total) as total')->groupBy('status')->get(), 'attendance' => AttendanceRecord::whereBetween('attendance_date', [$from, $to])->selectRaw('status,count(*) as count')->groupBy('status')->get(), 'payroll' => (float) PayrollItem::whereHas('payrollRun', fn ($q) => $q->whereBetween('period_start', [$from, $to]))->sum('net_pay')];
+        $inventory = Product::orderBy('name')->get();
+        $orders = Order::whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+        $attendance = AttendanceRecord::whereBetween('attendance_date', [$from->copy()->toDateString(), $to->copy()->toDateString()]);
+        $payrollRuns = PayrollRun::with('creator:id,name')->withCount('items')
+            ->withSum('items as gross_pay', 'gross_pay')->withSum('items as net_pay', 'net_pay')
+            ->whereBetween('period_start', [$from->toDateString(), $to->toDateString()])->latest('finalized_at')->get();
+
+        return [
+            'range' => [$from, $to],
+            'sales' => ['total' => (float) (clone $sales)->sum('total'), 'vatable_sales' => (float) (clone $sales)->sum('vatable_sales'), 'vat_amount' => (float) (clone $sales)->sum('vat_amount'), 'count' => (clone $sales)->count(), 'by_channel' => (clone $sales)->selectRaw('channel,count(*) as count,sum(total) as total')->groupBy('channel')->get()],
+            'inventory' => $inventory,
+            'inventory_summary' => ['products' => $inventory->count(), 'units' => $inventory->sum('stock_quantity'), 'reserved' => $inventory->sum('reserved_quantity'), 'value' => round($inventory->sum(fn ($p) => $p->stock_quantity * (float) $p->price), 2), 'low_stock' => $inventory->where('is_low_stock', true)->count()],
+            'orders' => (clone $orders)->selectRaw('status,count(*) as count,sum(total) as total')->groupBy('status')->get(),
+            'orders_summary' => ['count' => (clone $orders)->count(), 'value' => (float) (clone $orders)->sum('total'), 'pending' => (clone $orders)->whereIn('status', ['preparing', 'dispatched', 'delivered'])->count()],
+            'attendance' => (clone $attendance)->selectRaw('status,count(*) as count')->groupBy('status')->get(),
+            'attendance_summary' => ['records' => (clone $attendance)->count(), 'employees' => (clone $attendance)->distinct('employee_id')->count('employee_id'), 'present' => (clone $attendance)->where('status', 'present')->count()],
+            'employees' => ['active' => Employee::where('is_active', true)->count()],
+            'payroll' => ['net_total' => (float) $payrollRuns->sum('net_pay'), 'gross_total' => (float) $payrollRuns->sum('gross_pay'), 'runs' => $payrollRuns],
+        ];
     }
 
     public function devices(Request $r)
@@ -329,15 +357,25 @@ class OperationsController extends Controller
         abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422);
         $d = $r->validate(['subject_id' => 'required|string', 'event_id' => 'required|string', 'recognized_at' => 'required|date', 'confidence' => 'required|numeric|min:0|max:100', 'status' => 'nullable|in:present,half_day']);
         $employee = Employee::where('face_subject_id', $d['subject_id'])->where('is_active', true)->firstOrFail();
-        $at = Carbon::parse($d['recognized_at']);
+        $at = Carbon::parse($d['recognized_at'])->setTimezone('Asia/Manila');
         $record = DB::transaction(function () use ($employee, $at, $d, $r, $device, $outbox) {
-            $record = AttendanceRecord::updateOrCreate(['employee_id' => $employee->id, 'attendance_date' => $at->toDateString()], ['device_id' => $device->id, 'status' => $d['status'] ?? 'present', 'recognized_at' => $at, 'match_confidence' => $d['confidence'], 'provider_event_id' => $d['event_id'], 'metadata' => $r->except(['subject_id'])]);
-            $outbox->queueAttendance($record);
+            $created = DB::table('attendance_records')->insertOrIgnore([
+                'employee_id' => $employee->id, 'attendance_date' => $at->toDateString(),
+                'device_id' => $device->id, 'status' => $d['status'] ?? 'present',
+                'recognized_at' => $at, 'match_confidence' => $d['confidence'],
+                'provider_event_id' => $d['event_id'], 'metadata' => json_encode($r->except(['subject_id'])),
+                'created_at' => now(), 'updated_at' => now(),
+            ]) === 1;
+            $record = AttendanceRecord::where('employee_id', $employee->id)->whereDate('attendance_date', $at->toDateString())->firstOrFail();
+            $record->setAttribute('was_recently_created_by_device', $created);
+            if ($created) $outbox->queueAttendance($record);
 
             return $record;
         });
 
-        return response()->json($record, 201);
+        $created = (bool) $record->getAttribute('was_recently_created_by_device');
+        $record->offsetUnset('was_recently_created_by_device');
+        return response()->json([...$record->toArray(), 'already_recorded' => ! $created], $created ? 201 : 200);
     }
 
     public function deviceEmployees(Request $r)
