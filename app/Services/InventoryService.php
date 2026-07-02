@@ -55,12 +55,13 @@ class InventoryService
             $products = $this->lockProducts($lines);
             [$items, $subtotal, $discount] = $this->priceLines($products, $lines);
             $discount += round(max(0, min(100, $saleDiscount)) / 100 * ($subtotal - $discount), 2);
+            $tax = $this->taxBreakdown($subtotal - $discount);
             $sale = Sale::create([
                 'reference' => 'POS-'.now()->format('YmdHis').'-'.Str::upper(Str::random(4)),
                 'idempotency_key' => $idempotencyKey,
                 'cashier_id' => $cashier->id, 'channel' => 'pos', 'payment_method' => $paymentMethod,
                 'status' => 'completed', 'subtotal' => $subtotal, 'discount_total' => $discount,
-                'total' => $subtotal - $discount, 'completed_at' => now(),
+                ...$tax, 'completed_at' => now(),
             ]);
 
             foreach ($items as $item) {
@@ -102,6 +103,9 @@ class InventoryService
                 'status' => 'completed',
                 'subtotal' => $payload['subtotal'],
                 'discount_total' => $payload['discount_total'],
+                'vat_rate' => $payload['vat_rate'] ?? config('tax.vat_rate'),
+                'vatable_sales' => $payload['vatable_sales'] ?? round($payload['total'] / (1 + config('tax.vat_rate')), 2),
+                'vat_amount' => $payload['vat_amount'] ?? round($payload['total'] - ($payload['total'] / (1 + config('tax.vat_rate'))), 2),
                 'total' => $payload['total'],
                 'completed_at' => $payload['completed_at'],
                 'synced_at' => now(),
@@ -131,12 +135,13 @@ class InventoryService
         return DB::transaction(function () use ($customer, $lines, $paymentMethod, $idempotencyKey) {
             $products = $this->lockProducts($lines);
             [$items, $subtotal, $discount] = $this->priceLines($products, $lines);
+            $tax = $this->taxBreakdown($subtotal - $discount);
             $order = Order::create([
                 'reference' => 'WEB-'.now()->format('YmdHis').'-'.Str::upper(Str::random(4)),
                 'idempotency_key' => $idempotencyKey,
                 'customer_id' => $customer->id, 'status' => 'preparing', 'payment_status' => 'on_hold',
                 'payment_method' => $paymentMethod, 'subtotal' => $subtotal, 'discount_total' => $discount,
-                'total' => $subtotal - $discount,
+                ...$tax,
             ]);
             foreach ($items as $item) {
                 $product = $products[$item['product_id']];
@@ -215,6 +220,25 @@ class InventoryService
         }
 
         return [$items, round($subtotal, 2), round($discount, 2)];
+    }
+
+    private function taxBreakdown(float $discountedAmount): array
+    {
+        $rate = max(0, (float) config('tax.vat_rate', 0.12));
+        if (config('tax.prices_include_vat', true)) {
+            $total = round($discountedAmount, 2);
+            $vatable = $rate > 0 ? round($total / (1 + $rate), 2) : $total;
+        } else {
+            $vatable = round($discountedAmount, 2);
+            $total = round($vatable * (1 + $rate), 2);
+        }
+
+        return [
+            'vat_rate' => $rate,
+            'vatable_sales' => $vatable,
+            'vat_amount' => round($total - $vatable, 2),
+            'total' => $total,
+        ];
     }
 
     private function moveLocked(Product $product, int $stockDelta, int $reservedDelta, string $type, ?User $actor, string $reason, mixed $reference): void

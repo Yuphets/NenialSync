@@ -14,6 +14,7 @@ const syncing = ref(false);
 async function save() {
     try {
         message.value = (await axios.put('/api/auth/password', form)).data.message;
+        await auth.hydrate();
         Object.assign(form, { current_password: '', password: '', password_confirmation: '' });
     } catch (error) {
         message.value = error.response?.data?.message || Object.values(error.response?.data?.errors || {})[0]?.[0] || 'Unable to update password.';
@@ -46,6 +47,7 @@ onMounted(loadSync);
 
 <template>
     <PageHeader title="Settings" subtitle="Account security and store connectivity" />
+    <p v-if="auth.user.must_change_password" class="notice">An administrator issued a temporary password. Change it now before continuing normal work.</p>
     <div class="two-col">
         <section class="panel profile">
             <img src="/media/Nenial.jpg">
@@ -68,6 +70,7 @@ onMounted(loadSync);
         <div class="sync-grid">
             <div><span>Pending events</span><strong>{{ sync.pending }}</strong></div>
             <div><span>Open conflicts</span><strong>{{ sync.conflicts }}</strong></div>
+            <div><span>Accounts & workforce</span><strong>{{ sync.accounts_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
             <div><span>Last synchronized</span><strong>{{ sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Not yet' }}</strong></div>
             <button v-if="sync.enabled" class="btn primary" :disabled="syncing" @click="runSync">{{ syncing ? 'Synchronizing…' : 'Synchronize now' }}</button>
         </div>

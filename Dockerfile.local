@@ -12,16 +12,18 @@ COPY composer.json composer.lock ./
 RUN composer install --no-dev --prefer-dist --no-interaction --no-scripts --optimize-autoloader
 
 FROM php:8.5-apache
-RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev curl \
-    && docker-php-ext-install pdo_pgsql \
+RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev libpq-dev curl \
+    && docker-php-ext-install intl pdo_pgsql \
     && a2enmod rewrite headers \
     && sed -ri 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/*.conf /etc/apache2/apache2.conf \
+    && echo 'ServerName localhost' > /etc/apache2/conf-available/servername.conf \
+    && a2enconf servername \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /var/www/html
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
 COPY --from=frontend /app/public/build ./public/build
-RUN mkdir -p storage/framework/{cache/data,sessions,views} storage/logs bootstrap/cache \
+RUN mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
     && chmod +x docker/local-entrypoint.sh
 ENTRYPOINT ["/var/www/html/docker/local-entrypoint.sh"]

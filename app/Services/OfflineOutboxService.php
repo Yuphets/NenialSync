@@ -4,11 +4,45 @@ namespace App\Services;
 
 use App\Models\AttendanceRecord;
 use App\Models\Sale;
+use App\Models\Employee;
+use App\Models\User;
 use App\Models\SyncOutbox;
 use Illuminate\Support\Str;
 
 class OfflineOutboxService
 {
+    public function queueUser(User $user): void
+    {
+        $this->queue('user.account_updated', User::class, $user->id, [
+            'name' => $user->name,
+            'email' => $user->email,
+            'password_hash' => $user->getRawOriginal('password'),
+            'role' => $user->role,
+            'is_active' => $user->is_active,
+            'password_changed_at' => $user->password_changed_at?->toIso8601String(),
+            'must_change_password' => $user->must_change_password,
+        ]);
+    }
+
+    public function queueEmployee(Employee $employee): void
+    {
+        $employee->loadMissing('user');
+        $this->queue('employee.updated', Employee::class, $employee->id, [
+            'employee_number' => $employee->employee_number,
+            'user_email' => $employee->user?->email,
+            'name' => $employee->name,
+            'job_title' => $employee->job_title,
+            'weekly_salary' => (float) $employee->weekly_salary,
+            'incentive' => (float) $employee->incentive,
+            'overtime_hourly_rate' => (float) $employee->overtime_hourly_rate,
+            'overtime_hours' => (float) $employee->overtime_hours,
+            'deduction_plan' => $employee->deduction_plan,
+            'face_subject_id' => $employee->face_subject_id,
+            'is_active' => $employee->is_active,
+            'deleted_at' => $employee->deleted_at?->toIso8601String(),
+        ]);
+    }
+
     public function queueSale(Sale $sale): void
     {
         if (! config('offline.enabled')) {
@@ -26,6 +60,9 @@ class OfflineOutboxService
                     'payment_method' => $sale->payment_method,
                     'subtotal' => (float) $sale->subtotal,
                     'discount_total' => (float) $sale->discount_total,
+                    'vat_rate' => (float) $sale->vat_rate,
+                    'vatable_sales' => (float) $sale->vatable_sales,
+                    'vat_amount' => (float) $sale->vat_amount,
                     'total' => (float) $sale->total,
                     'completed_at' => $sale->completed_at->toIso8601String(),
                     'items' => $sale->items->map(fn ($item) => [
@@ -71,5 +108,17 @@ class OfflineOutboxService
                 'aggregate_type' => AttendanceRecord::class, 'aggregate_id' => $record->id, 'payload' => $payload,
             ]);
         }
+    }
+
+    private function queue(string $eventType, string $aggregateType, int $aggregateId, array $payload): void
+    {
+        if (! config('offline.enabled')) return;
+        $pending = SyncOutbox::where('event_type', $eventType)->where('aggregate_type', $aggregateType)
+            ->where('aggregate_id', $aggregateId)->whereIn('status', ['pending', 'failed'])->first();
+        if ($pending) {
+            $pending->update(['payload' => $payload, 'status' => 'pending', 'last_error' => null]);
+            return;
+        }
+        SyncOutbox::create(['event_id' => (string) Str::uuid(), 'event_type' => $eventType, 'aggregate_type' => $aggregateType, 'aggregate_id' => $aggregateId, 'payload' => $payload]);
     }
 }

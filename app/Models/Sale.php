@@ -10,7 +10,12 @@ class Sale extends Model
 
     protected function casts(): array
     {
-        return ['completed_at' => 'datetime'];
+        return [
+            'completed_at' => 'datetime',
+            'vat_rate' => 'decimal:4',
+            'vatable_sales' => 'decimal:2',
+            'vat_amount' => 'decimal:2',
+        ];
     }
 
     public function items()

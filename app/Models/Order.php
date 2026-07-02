@@ -10,7 +10,10 @@ class Order extends Model
 
     protected function casts(): array
     {
-        return ['dispatched_at' => 'datetime', 'delivered_at' => 'datetime', 'received_at' => 'datetime', 'cancelled_at' => 'datetime'];
+        return [
+            'dispatched_at' => 'datetime', 'delivered_at' => 'datetime', 'received_at' => 'datetime', 'cancelled_at' => 'datetime',
+            'vat_rate' => 'decimal:4', 'vatable_sales' => 'decimal:2', 'vat_amount' => 'decimal:2',
+        ];
     }
 
     public function items()

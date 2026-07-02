@@ -3,10 +3,14 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\Device;
+use App\Models\Employee;
+use App\Models\User;
 use App\Models\SyncConflict;
 use App\Models\SyncOutbox;
 use App\Models\SyncState;
 use Illuminate\Http\Client\Response;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -56,7 +60,15 @@ class LocalSyncService
             return $this->status(false, $synced, $conflicts, $products->body());
         }
 
-        DB::transaction(function () use ($products) {
+        try {
+            $configuration = $this->client()->get($this->url('/api/sync/configuration'));
+            $accountSync = $configuration->successful();
+        } catch (ConnectionException) {
+            $configuration = null;
+            $accountSync = false;
+        }
+
+        DB::transaction(function () use ($products, $configuration, $accountSync) {
             foreach ($products->json() as $remote) {
                 $product = Product::withTrashed()->firstOrNew(['sku' => $remote['sku']]);
                 $product->fill(collect($remote)->only([
@@ -66,11 +78,13 @@ class LocalSyncService
                 $product->deleted_at = $remote['deleted_at'];
                 $product->save();
             }
+
+            if ($accountSync) $this->applyConfiguration($configuration->json());
         });
 
-        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json())], 'last_synced_at' => now()]);
+        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync], 'last_synced_at' => now()]);
 
-        return $this->status(true, $synced, $conflicts);
+        return $this->status(true, $synced, $conflicts, $accountSync ? null : 'Inventory synced. Deploy the latest cloud release to enable account and workforce synchronization.');
     }
 
     public function status(bool $online = true, int $synced = 0, int $conflicts = 0, ?string $message = null): array
@@ -84,6 +98,7 @@ class LocalSyncService
             'synced_now' => $synced,
             'conflicts_now' => $conflicts,
             'last_synced_at' => SyncState::where('key', 'cloud')->value('last_synced_at'),
+            'accounts_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'accounts_synced', false),
             'message' => $message,
         ];
     }
@@ -93,6 +108,8 @@ class LocalSyncService
         $path = match ($event->event_type) {
             'sale.completed' => '/api/sync/sales',
             'attendance.recorded' => '/api/sync/attendance',
+            'user.account_updated' => '/api/sync/users',
+            'employee.updated' => '/api/sync/employees',
             default => throw new RuntimeException("Unsupported sync event {$event->event_type}."),
         };
 
@@ -117,6 +134,29 @@ class LocalSyncService
     {
         if (! config('offline.enabled') || ! config('offline.cloud_url') || ! config('offline.sync_token')) {
             throw new RuntimeException('Local offline synchronization is not fully configured.');
+        }
+    }
+
+    private function applyConfiguration(array $configuration): void
+    {
+        foreach ($configuration['users'] ?? [] as $remote) {
+            $user = User::firstOrNew(['email' => $remote['email']]);
+            $user->forceFill([
+                'name' => $remote['name'], 'password' => $remote['password_hash'], 'role' => $remote['role'],
+                'is_active' => $remote['is_active'], 'password_changed_at' => $remote['password_changed_at'],
+                'must_change_password' => $remote['must_change_password'] ?? false,
+            ])->save();
+        }
+        foreach ($configuration['employees'] ?? [] as $remote) {
+            $employee = Employee::withTrashed()->firstOrNew(['employee_number' => $remote['employee_number']]);
+            $employee->fill(collect($remote)->except(['employee_number', 'user_email', 'deleted_at'])->all());
+            $employee->user_id = isset($remote['user_email']) ? User::where('email', $remote['user_email'])->value('id') : null;
+            $employee->save();
+            $remote['deleted_at'] ? $employee->delete() : $employee->restore();
+        }
+        foreach ($configuration['devices'] ?? [] as $remote) {
+            $identity = $remote['external_id'] ? ['external_id' => $remote['external_id']] : ['name' => $remote['name'], 'type' => $remote['type']];
+            Device::updateOrCreate($identity, collect($remote)->except(['external_id'])->all());
         }
     }
 }

@@ -8,6 +8,7 @@ use App\Models\Employee;
 use App\Models\Order;
 use App\Models\PayrollItem;
 use App\Models\PayrollRun;
+use App\Models\PasswordResetTicket;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\User;
@@ -17,6 +18,8 @@ use App\Services\PayrollCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Str;
 
 class OperationsController extends Controller
@@ -99,26 +102,30 @@ class OperationsController extends Controller
         return Employee::where('is_active', true)->orderBy('name')->get();
     }
 
-    public function employeeStore(Request $r)
+    public function employeeStore(Request $r, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
 
-        return response()->json(Employee::create($this->employeeData($r)), 201);
+        $employee = Employee::create($this->employeeData($r));
+        $outbox->queueEmployee($employee);
+        return response()->json($employee, 201);
     }
 
-    public function employeeUpdate(Request $r, Employee $employee)
+    public function employeeUpdate(Request $r, Employee $employee, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $employee->update($this->employeeData($r, $employee));
+        $outbox->queueEmployee($employee->fresh());
 
         return $employee->fresh();
     }
 
-    public function employeeDestroy(Request $r, Employee $employee)
+    public function employeeDestroy(Request $r, Employee $employee, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin', 403);
         $employee->update(['is_active' => false]);
         $employee->delete();
+        $outbox->queueEmployee($employee);
 
         return response()->noContent();
     }
@@ -169,6 +176,31 @@ class OperationsController extends Controller
         });
     }
 
+    public function payrollExport(Request $r, PayrollCalculator $calc)
+    {
+        abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
+        $data = $r->validate([
+            'period_start' => 'required|date',
+            'period_end' => 'required|date|after_or_equal:period_start',
+        ]);
+        $rows = Employee::where('is_active', true)->orderBy('name')->get()
+            ->map(fn ($employee) => ['employee' => $employee, 'calculation' => $calc->calculate($employee)]);
+        $filename = "nenial-payroll-{$data['period_start']}-to-{$data['period_end']}.csv";
+
+        return response()->streamDownload(function () use ($rows, $data) {
+            $output = fopen('php://output', 'w');
+            fputcsv($output, ['Nenial Payroll', $data['period_start'], $data['period_end']]);
+            fputcsv($output, []);
+            fputcsv($output, ['Employee No.', 'Employee', 'Job Title', 'Base Pay', 'Incentive', 'Overtime Pay', 'Gross Pay', 'SSS', 'Pag-IBIG', 'PhilHealth', 'Net Pay']);
+            foreach ($rows as $row) {
+                $employee = $row['employee'];
+                $value = $row['calculation'];
+                fputcsv($output, [$employee->employee_number, $employee->name, $employee->job_title, $value['base_pay'], $value['incentive'], $value['overtime_pay'], $value['gross_pay'], $value['sss'], $value['pagibig'], $value['philhealth'], $value['net_pay']]);
+            }
+            fclose($output);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
     public function users(Request $r)
     {
         abort_unless($r->user()->role === 'admin', 403);
@@ -176,22 +208,68 @@ class OperationsController extends Controller
         return User::orderBy('name')->get();
     }
 
-    public function userRole(Request $r, User $user)
+    public function userRole(Request $r, User $user, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin', 403);
         $d = $r->validate(['role' => 'required|in:admin,assistant,cashier,user']);
         $user->update($d);
+        $outbox->queueUser($user->fresh());
 
         return $user;
     }
 
-    public function userDestroy(Request $r, User $user)
+    public function userDestroy(Request $r, User $user, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin' && $user->id !== $r->user()->id, 403);
         abort_if($user->role === 'admin' && User::where('role', 'admin')->where('is_active', true)->count() === 1, 422, 'Final admin cannot be removed.');
         $user->update(['is_active' => false]);
+        $outbox->queueUser($user->fresh());
 
         return response()->noContent();
+    }
+
+    public function passwordTickets(Request $r)
+    {
+        abort_unless($r->user()->role === 'admin', 403);
+
+        return PasswordResetTicket::with('user:id,name,email,is_active')
+            ->where('status', 'open')->latest('requested_at')->get();
+    }
+
+    public function userPasswordReset(Request $r, User $user, OfflineOutboxService $outbox)
+    {
+        abort_unless($r->user()->role === 'admin', 403);
+        abort_unless($user->is_active, 422, 'The account is disabled.');
+        abort_if($user->id === $r->user()->id, 422, 'Use Settings to change your own password.');
+        $data = $r->validate([
+            'ticket_id' => 'required|integer|exists:password_reset_tickets,id',
+            'current_password' => 'required|current_password',
+            'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()],
+        ]);
+        $ticket = PasswordResetTicket::whereKey($data['ticket_id'])->where('status', 'open')->firstOrFail();
+        abort_unless(Str::lower($ticket->email) === Str::lower($user->email), 422, 'This ticket does not belong to the selected user.');
+
+        DB::transaction(function () use ($r, $user, $ticket, $data) {
+            $user->update([
+                'password' => Hash::make($data['password']),
+                'password_changed_at' => now(),
+                'must_change_password' => true,
+            ]);
+            DB::table('sessions')->where('user_id', $user->id)->delete();
+            $ticket->update(['status' => 'resolved', 'resolved_by' => $r->user()->id, 'resolved_at' => now()]);
+            DB::table('audit_logs')->insert([
+                'actor_id' => $r->user()->id,
+                'action' => 'user.password_reset_by_admin',
+                'auditable_type' => User::class,
+                'auditable_id' => $user->id,
+                'metadata' => json_encode(['ticket_number' => $ticket->ticket_number]),
+                'ip_address' => $r->ip(),
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+        $outbox->queueUser($user->fresh());
+
+        return response()->json(['message' => 'Temporary password applied. The user must change it after signing in.']);
     }
 
     public function report(Request $r)
@@ -200,7 +278,8 @@ class OperationsController extends Controller
         $from = $r->date('from') ?: now()->startOfMonth();
         $to = $r->date('to') ?: now()->endOfMonth();
 
-        return ['range' => [$from, $to], 'sales' => ['total' => (float) Sale::whereBetween('completed_at', [$from->startOfDay(), $to->endOfDay()])->sum('total'), 'count' => Sale::whereBetween('completed_at', [$from->startOfDay(), $to->endOfDay()])->count()], 'inventory' => Product::orderBy('name')->get(), 'orders' => Order::whereBetween('created_at', [$from->startOfDay(), $to->endOfDay()])->selectRaw('status,count(*) as count,sum(total) as total')->groupBy('status')->get(), 'attendance' => AttendanceRecord::whereBetween('attendance_date', [$from, $to])->selectRaw('status,count(*) as count')->groupBy('status')->get(), 'payroll' => (float) PayrollItem::whereHas('payrollRun', fn ($q) => $q->whereBetween('period_start', [$from, $to]))->sum('net_pay')];
+        $sales = Sale::whereBetween('completed_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()]);
+        return ['range' => [$from, $to], 'sales' => ['total' => (float) (clone $sales)->sum('total'), 'vatable_sales' => (float) (clone $sales)->sum('vatable_sales'), 'vat_amount' => (float) (clone $sales)->sum('vat_amount'), 'count' => (clone $sales)->count()], 'inventory' => Product::orderBy('name')->get(), 'orders' => Order::whereBetween('created_at', [$from->copy()->startOfDay(), $to->copy()->endOfDay()])->selectRaw('status,count(*) as count,sum(total) as total')->groupBy('status')->get(), 'attendance' => AttendanceRecord::whereBetween('attendance_date', [$from, $to])->selectRaw('status,count(*) as count')->groupBy('status')->get(), 'payroll' => (float) PayrollItem::whereHas('payrollRun', fn ($q) => $q->whereBetween('period_start', [$from, $to]))->sum('net_pay')];
     }
 
     public function devices(Request $r)
@@ -235,6 +314,15 @@ class OperationsController extends Controller
         });
 
         return response()->json($record, 201);
+    }
+
+    public function deviceEmployees(Request $r)
+    {
+        $device = $r->attributes->get('device');
+        abort_unless($device->type === 'facial', 422, 'A facial-recognition device token is required.');
+
+        return Employee::where('is_active', true)->whereNotNull('face_subject_id')
+            ->orderBy('name')->get(['employee_number', 'name', 'job_title', 'face_subject_id']);
     }
 
     private function employeeData(Request $r, ?Employee $e = null)

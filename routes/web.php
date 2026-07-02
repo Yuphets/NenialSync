@@ -11,11 +11,16 @@ Route::prefix('api')->group(function () {
     Route::get('/storefront/products', [ProductController::class, 'index']);
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
+    Route::post('/auth/password-tickets', [AuthController::class, 'passwordTicket'])->middleware('throttle:3,10');
     Route::post('/device/attendance', [OperationsController::class, 'deviceAttendance'])->middleware(['device', 'throttle:120,1']);
+    Route::get('/device/employees', [OperationsController::class, 'deviceEmployees'])->middleware(['device', 'throttle:60,1']);
     Route::middleware(['sync', 'throttle:240,1'])->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
+        Route::get('/sync/configuration', [CloudSyncController::class, 'configuration']);
         Route::post('/sync/sales', [CloudSyncController::class, 'sale']);
         Route::post('/sync/attendance', [CloudSyncController::class, 'attendance']);
+        Route::post('/sync/users', [CloudSyncController::class, 'user']);
+        Route::post('/sync/employees', [CloudSyncController::class, 'employee']);
     });
 
     Route::middleware('auth')->group(function () {
@@ -33,6 +38,8 @@ Route::prefix('api')->group(function () {
             Route::get('/users', [OperationsController::class, 'users']);
             Route::put('/users/{user}/role', [OperationsController::class, 'userRole']);
             Route::delete('/users/{user}', [OperationsController::class, 'userDestroy']);
+            Route::get('/password-tickets', [OperationsController::class, 'passwordTickets']);
+            Route::post('/users/{user}/password-reset', [OperationsController::class, 'userPasswordReset']);
             Route::get('/devices', [OperationsController::class, 'devices']);
             Route::post('/devices', [OperationsController::class, 'deviceStore']);
         });
@@ -51,6 +58,7 @@ Route::prefix('api')->group(function () {
         Route::post('/attendance', [OperationsController::class, 'attendanceStore'])->middleware('role:admin');
         Route::get('/payroll/preview', [OperationsController::class, 'payrollPreview'])->middleware('role:admin,assistant');
         Route::post('/payroll/runs', [OperationsController::class, 'payrollRun'])->middleware('role:admin,assistant');
+        Route::get('/payroll/export', [OperationsController::class, 'payrollExport'])->middleware('role:admin,assistant');
         Route::get('/reports', [OperationsController::class, 'report'])->middleware('role:admin,assistant');
         Route::get('/local-sync/status', [LocalSyncController::class, 'status'])->middleware('role:admin,assistant');
         Route::post('/local-sync/run', [LocalSyncController::class, 'run'])->middleware('role:admin,assistant');

@@ -175,6 +175,20 @@ docker compose -f docker-compose.local.yml up -d --build
 
 Point counter devices to `http://192.168.1.20:8080` (replace the address with the server's reserved LAN IP). Allow TCP port 8080 through the server firewall only for the trusted store network. Use a UPS and back up the `nenial-postgres` Docker volume regularly.
 
+From an **Administrator PowerShell** on the store server, add the restricted Windows firewall rule once:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-windows-firewall.ps1
+```
+
+Create a PostgreSQL backup immediately (the script retains 30 days by default):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\backup-local.ps1
+```
+
+Backups are written to the ignored `backups` directory. Periodically copy them to encrypted storage outside this computer. To restore a selected backup during disaster recovery, stop the app and sync services, copy the dump into PostgreSQL, and run `pg_restore`; test this procedure on a non-production database before relying on it.
+
 For an installable PWA on devices other than the server itself, put a trusted HTTPS reverse proxy in front of the LAN address. Browsers permit service workers on HTTPS origins and on `localhost`, but not ordinary HTTP LAN addresses.
 
 ### Synchronization behavior
@@ -186,6 +200,7 @@ For an installable PWA on devices other than the server itself, put a trusted HT
 - Cloud inventory is pulled only after every pending local event is accepted.
 - If online orders consumed stock while the store was offline, the event is retained as an open conflict. Cloud inventory is not copied over the unresolved local state.
 - Admin and Assistant Admin can see pending events, conflicts, and the last successful sync under **Settings** and trigger a manual sync.
+- Users, password hashes, roles, employee payroll settings, face subject IDs, and facial-device credentials synchronize over the authenticated TLS sync channel. Local changes use the durable outbox before the cloud snapshot is pulled.
 
 Resolve a conflict by reviewing the physical count and cloud order commitments, making the authorized inventory correction in the cloud workspace, then retrying synchronization. Never delete the local outbox or Docker volume to bypass a conflict.
 
@@ -198,7 +213,18 @@ docker compose -f docker-compose.local.yml logs -f sync
 
 ## Facial-recognition terminal setup
 
-Nenial deliberately stores only the vendor's **subject identifier**, event ID, timestamp, and confidence—not raw facial templates.
+Nenial includes a browser-based attendance terminal. Raw images are not stored. Numerical face descriptors stay in IndexedDB on the camera computer; Neon receives only the subject identifier, event ID, timestamp, and confidence.
+
+1. Assign each employee a unique **Face Subject ID** under Workforce.
+2. Under **Devices**, register a Facial device and copy its one-time token.
+3. On the store camera computer open `http://localhost:8080/face-terminal`. For a separate LAN device, use a trusted HTTPS reverse proxy because browsers do not allow camera access on ordinary HTTP LAN origins.
+4. Paste the token, start the camera, select an employee, and capture the three enrollment angles with their consent.
+5. During attendance, face matching happens locally and a blink is required before submission. Use consistent lighting and mount the camera around eye level.
+6. Use **Remove** under Local enrollments when consent is withdrawn or the employee leaves. Browser templates never reach the server.
+
+The included blink check reduces simple photograph replay, but it is not equivalent to certified depth/IR anti-spoofing. For higher-security sites, use a commercial depth/IR facial terminal with the webhook below.
+
+### Commercial terminal webhook
 
 1. Choose a commercial terminal that supports HTTPS webhooks (for example, a supported ZKTeco, Hikvision, or Suprema integration gateway).
 2. In **Devices**, register a Facial device and copy its one-time token.
@@ -231,7 +257,7 @@ The webhook is idempotent by provider event ID and updates one attendance record
 ## Production integration boundaries
 
 - `protected_payment` currently implements the order hold, reservation, delivery, receipt, and settlement state machine. Connect a PCI-compliant provider such as your chosen Philippine payment gateway before collecting real card or wallet funds; never store card details in this application.
-- Facial matching occurs on the physical terminal or its vendor gateway. Nenial receives authenticated recognition events and does not claim to perform biometric matching in the browser.
+- Facial matching occurs locally in the Nenial browser terminal or on a commercial vendor gateway. Browser templates stay on the terminal and are never synchronized to Neon.
 - Inventory screens synchronize every three seconds from Neon. PostgreSQL remains authoritative, so simultaneous POS and online purchases are serialized by row locks even if a screen has not refreshed yet.
 
 ## Verification

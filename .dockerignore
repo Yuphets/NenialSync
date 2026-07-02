@@ -2,8 +2,11 @@
 .env
 node_modules
 vendor
+public/hot
 public/build
 storage/logs/*
+storage/framework
+bootstrap/cache/*.php
 database/*.sqlite
 legacy
 tests
