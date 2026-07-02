@@ -193,14 +193,14 @@ For an installable PWA on devices other than the server itself, put a trusted HT
 
 ### Synchronization behavior
 
-- A local sale and its outbox event commit in the same PostgreSQL transaction.
+- Local sales, customer orders, and fulfillment status changes commit with durable outbox events in the same PostgreSQL transaction.
 - The worker pushes original prices, timestamps, cashier identity, and line items with a UUID idempotency key.
 - Cloud imports lock inventory rows and can apply each event only once.
 - Attendance events use the same durable outbox.
 - Cloud inventory is pulled only after every pending local event is accepted.
 - If online orders consumed stock while the store was offline, the event is retained as an open conflict. Cloud inventory is not copied over the unresolved local state.
 - Admin and Assistant Admin can see pending events, conflicts, and the last successful sync under **Settings** and trigger a manual sync.
-- Users, password hashes, roles, employee payroll settings, face subject IDs, and facial-device credentials synchronize over the authenticated TLS sync channel. Local changes use the durable outbox before the cloud snapshot is pulled.
+- Users, password hashes, roles, employee payroll settings, face subject IDs, facial-device credentials, and complete order records synchronize over the authenticated TLS sync channel. Local changes use the durable outbox before the cloud snapshot is pulled.
 
 Resolve a conflict by reviewing the physical count and cloud order commitments, making the authorized inventory correction in the cloud workspace, then retrying synchronization. Never delete the local outbox or Docker volume to bypass a conflict.
 

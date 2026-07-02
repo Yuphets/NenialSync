@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AttendanceRecord;
 use App\Models\Employee;
 use App\Models\Device;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SyncReceipt;
@@ -29,6 +30,26 @@ class CloudSyncController extends Controller
                 'id', 'product_id', 'type', 'quantity_delta', 'reserved_delta',
                 'stock_before', 'stock_after', 'reserved_before', 'reserved_after',
                 'reason', 'idempotency_key', 'created_at', 'updated_at',
+            ]);
+    }
+
+    public function orders()
+    {
+        return Order::with(['customer:id,email', 'items'])
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Order $order) => [
+                ...$order->only([
+                    'reference', 'idempotency_key', 'status', 'payment_status', 'payment_method',
+                    'payment_reference', 'subtotal', 'discount_total', 'vat_rate', 'vatable_sales',
+                    'vat_amount', 'total', 'dispatched_at', 'delivered_at', 'received_at',
+                    'cancelled_at', 'created_at', 'updated_at',
+                ]),
+                'customer_email' => $order->customer->email,
+                'items' => $order->items->map(fn ($item) => $item->only([
+                    'product_name', 'sku', 'quantity', 'unit_price', 'discount_percent',
+                    'line_total', 'created_at', 'updated_at',
+                ]))->values(),
             ]);
     }
 
@@ -88,6 +109,70 @@ class CloudSyncController extends Controller
         );
 
         return response()->json($sale, 201);
+    }
+
+    public function order(Request $request, InventoryService $inventory)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80', 'event_id' => 'required|uuid',
+            'payload.customer_email' => 'required|email', 'payload.payment_method' => 'required|string|max:40',
+            'payload.items' => 'required|array|min:1', 'payload.items.*.sku' => 'required|string|max:80',
+            'payload.items.*.quantity' => 'required|integer|min:1',
+        ]);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return Order::with('items', 'customer')->findOrFail($receipt->result_id);
+        }
+
+        $customer = User::where('email', $data['payload']['customer_email'])->where('role', 'user')->where('is_active', true)->firstOrFail();
+        $products = Product::whereIn('sku', collect($data['payload']['items'])->pluck('sku'))->get()->keyBy('sku');
+        abort_unless($products->count() === collect($data['payload']['items'])->pluck('sku')->unique()->count(), 422, 'One or more ordered products no longer exist.');
+        $lines = collect($data['payload']['items'])->map(fn ($line) => ['product_id' => $products[$line['sku']]->id, 'quantity' => $line['quantity']])->all();
+        $order = $inventory->placeOrder($customer, $lines, $data['payload']['payment_method'], $data['event_id']);
+        SyncReceipt::firstOrCreate(
+            ['node_id' => $data['node_id'], 'event_id' => $data['event_id']],
+            ['event_type' => 'order.placed', 'result_type' => Order::class, 'result_id' => $order->id, 'received_at' => now()]
+        );
+
+        return response()->json($order, 201);
+    }
+
+    public function orderStatus(Request $request, InventoryService $inventory)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80', 'event_id' => 'required|uuid',
+            'payload.idempotency_key' => 'required|uuid', 'payload.actor_email' => 'required|email',
+            'payload.status' => 'required|in:dispatched,delivered,received,cancelled',
+            'payload.dispatched_at' => 'nullable|date', 'payload.delivered_at' => 'nullable|date',
+            'payload.received_at' => 'nullable|date', 'payload.cancelled_at' => 'nullable|date',
+        ]);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return Order::with('items', 'customer')->findOrFail($receipt->result_id);
+        }
+
+        $payload = $data['payload'];
+        $order = Order::where('idempotency_key', $payload['idempotency_key'])->firstOrFail();
+        $actor = User::where('email', $payload['actor_email'])->where('is_active', true)->firstOrFail();
+        abort_if(in_array($payload['status'], ['dispatched', 'delivered'], true) && ! in_array($actor->role, ['admin', 'assistant'], true), 403, 'Only fulfillment staff can update delivery status.');
+        abort_if($payload['status'] === 'cancelled' && $actor->role !== 'admin' && $order->customer_id !== $actor->id, 403, 'Only an administrator or the customer can cancel this order.');
+        abort_if($payload['status'] === 'received' && $order->customer_id !== $actor->id, 403, 'Only the customer can confirm receipt.');
+        if ($payload['status'] === 'dispatched' && $order->status === 'preparing') {
+            $order->update(['status' => 'dispatched', 'dispatched_at' => $payload['dispatched_at'] ?? now()]);
+        } elseif ($payload['status'] === 'delivered' && $order->status === 'dispatched') {
+            $order->update(['status' => 'delivered', 'delivered_at' => $payload['delivered_at'] ?? now()]);
+        } elseif ($payload['status'] === 'cancelled' && in_array($order->status, ['preparing', 'dispatched'], true)) {
+            $order = $inventory->cancelOrder($order, $actor);
+        } elseif ($payload['status'] === 'received' && $order->status === 'delivered') {
+            $order = $inventory->receiveOrder($order, $actor);
+        } elseif ($order->status !== $payload['status']) {
+            abort(422, "Cloud order is already {$order->status}; cannot apply {$payload['status']}.");
+        }
+
+        SyncReceipt::create([
+            'node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'order.status_updated',
+            'result_type' => Order::class, 'result_id' => $order->id, 'received_at' => now(),
+        ]);
+
+        return response()->json($order->fresh(['items', 'customer']), 201);
     }
 
     public function attendance(Request $request)

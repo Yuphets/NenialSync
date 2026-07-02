@@ -1,7 +1,10 @@
 <script setup>
-import { onMounted, ref } from 'vue'; import axios from 'axios'; import PageHeader from '../components/PageHeader.vue'; import { useAuthStore } from '../stores/auth';
+import { onBeforeUnmount, onMounted, ref } from 'vue'; import axios from 'axios'; import PageHeader from '../components/PageHeader.vue'; import { useAuthStore } from '../stores/auth';
 const auth = useAuthStore(); const orders = ref([]); const message = ref('');
-async function load() { orders.value = (await axios.get('/api/orders')).data.data; } onMounted(load);
+let refreshTimer; let loading = false;
+async function load() { if (loading) return; loading = true; try { orders.value = (await axios.get('/api/orders')).data.data; } catch { /* Keep the last good order list visible. */ } finally { loading = false; } }
+onMounted(() => { load(); refreshTimer = window.setInterval(load, 3000); });
+onBeforeUnmount(() => window.clearInterval(refreshTimer));
 async function status(order, value) { try { await axios.put(`/api/orders/${order.id}/status`, { status: value }); await load(); } catch (error) { message.value = error.response?.data?.message || 'Update failed.'; } }
 async function receive(order) { if (!confirm('Confirm all materials were received and release payment?')) return; await axios.post(`/api/orders/${order.id}/receive`); await load(); }
 async function cancel(order) { if (!confirm('Cancel this order and release reserved inventory?')) return; await axios.post(`/api/orders/${order.id}/cancel`); await load(); }

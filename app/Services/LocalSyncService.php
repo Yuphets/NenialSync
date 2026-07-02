@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\Device;
 use App\Models\Employee;
+use App\Models\Order;
 use App\Models\User;
 use App\Models\SyncConflict;
 use App\Models\SyncOutbox;
@@ -71,7 +72,15 @@ class LocalSyncService
             $accountSync = false;
         }
 
-        DB::transaction(function () use ($products, $configuration, $accountSync) {
+        try {
+            $orders = $this->client()->get($this->url('/api/sync/orders'));
+            $orderSync = $orders->successful();
+        } catch (ConnectionException) {
+            $orders = null;
+            $orderSync = false;
+        }
+
+        DB::transaction(function () use ($products, $configuration, $accountSync, $orders, $orderSync) {
             foreach ($products->json() as $remote) {
                 $product = Product::withTrashed()->firstOrNew(['sku' => $remote['sku']]);
                 $product->fill(collect($remote)->only([
@@ -83,15 +92,17 @@ class LocalSyncService
             }
 
             if ($accountSync) $this->applyConfiguration($configuration->json());
+            if ($orderSync) $this->applyOrders($orders->json());
         });
 
-        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'activity_synced' => $activitySync], 'last_synced_at' => now()]);
+        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'activity_synced' => $activitySync, 'orders_synced' => $orderSync], 'last_synced_at' => now()]);
         if ($activitySync) {
             SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
         }
 
         $message = match (true) {
             ! $accountSync => 'Inventory synced. Deploy the latest cloud release to enable account and workforce synchronization.',
+            ! $orderSync => 'Inventory synced. Deploy the latest cloud release to enable order synchronization.',
             ! $activitySync => 'Inventory totals synced. Deploy the latest cloud release to enable the shared activity feed.',
             default => null,
         };
@@ -112,6 +123,7 @@ class LocalSyncService
             'last_synced_at' => SyncState::where('key', 'cloud')->value('last_synced_at'),
             'accounts_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'accounts_synced', false),
             'activity_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'activity_synced', false),
+            'orders_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'orders_synced', false),
             'message' => $message,
         ];
     }
@@ -123,6 +135,8 @@ class LocalSyncService
             'attendance.recorded' => '/api/sync/attendance',
             'user.account_updated' => '/api/sync/users',
             'employee.updated' => '/api/sync/employees',
+            'order.placed' => '/api/sync/orders',
+            'order.status_updated' => '/api/sync/order-status',
             default => throw new RuntimeException("Unsupported sync event {$event->event_type}."),
         };
 
@@ -170,6 +184,30 @@ class LocalSyncService
         foreach ($configuration['devices'] ?? [] as $remote) {
             $identity = $remote['external_id'] ? ['external_id' => $remote['external_id']] : ['name' => $remote['name'], 'type' => $remote['type']];
             Device::updateOrCreate($identity, collect($remote)->except(['external_id'])->all());
+        }
+    }
+
+    private function applyOrders(array $orders): void
+    {
+        foreach ($orders as $remote) {
+            $customerId = User::where('email', $remote['customer_email'])->value('id');
+            if (! $customerId) {
+                throw new RuntimeException("Cannot synchronize order {$remote['reference']}: customer account is missing.");
+            }
+
+            $order = Order::firstOrNew(['idempotency_key' => $remote['idempotency_key']]);
+            $order->fill(collect($remote)->except(['customer_email', 'items'])->all());
+            $order->customer_id = $customerId;
+            $order->save();
+
+            $order->items()->delete();
+            foreach ($remote['items'] as $item) {
+                $productId = Product::withTrashed()->where('sku', $item['sku'])->value('id');
+                if (! $productId) {
+                    throw new RuntimeException("Cannot synchronize order {$remote['reference']}: product {$item['sku']} is missing.");
+                }
+                $order->items()->create([...$item, 'product_id' => $productId]);
+            }
         }
     }
 }

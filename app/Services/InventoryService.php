@@ -152,6 +152,7 @@ class InventoryService
                 $this->moveLocked($product, 0, $item['quantity'], 'reservation', $customer, 'Online order reservation', $order);
             }
             $this->audit($customer, 'order.placed', $order, null, $order->load('items')->toArray());
+            $this->outbox->queueOrderPlaced($order->fresh(['items', 'customer']));
 
             return $order->load('items', 'customer');
         }, 3);
@@ -170,6 +171,7 @@ class InventoryService
             }
             $lockedOrder->update(['status' => 'received', 'payment_status' => 'paid', 'received_at' => now()]);
             $this->audit($customer, 'order.received', $lockedOrder, null, $lockedOrder->fresh()->toArray());
+            $this->outbox->queueOrderStatus($lockedOrder->fresh(), $customer);
 
             return $lockedOrder->fresh(['items', 'customer']);
         }, 3);
@@ -188,6 +190,7 @@ class InventoryService
             }
             $lockedOrder->update(['status' => 'cancelled', 'payment_status' => 'voided', 'cancelled_at' => now()]);
             $this->audit($actor, 'order.cancelled', $lockedOrder, null, $lockedOrder->fresh()->toArray());
+            $this->outbox->queueOrderStatus($lockedOrder->fresh(), $actor);
 
             return $lockedOrder->fresh(['items', 'customer']);
         }, 3);

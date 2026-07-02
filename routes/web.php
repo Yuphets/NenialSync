@@ -17,11 +17,14 @@ Route::prefix('api')->group(function () {
     Route::middleware(['sync', 'throttle:240,1'])->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
         Route::get('/sync/inventory-activity', [CloudSyncController::class, 'inventoryActivity']);
+        Route::get('/sync/orders', [CloudSyncController::class, 'orders']);
         Route::get('/sync/configuration', [CloudSyncController::class, 'configuration']);
         Route::post('/sync/sales', [CloudSyncController::class, 'sale']);
         Route::post('/sync/attendance', [CloudSyncController::class, 'attendance']);
         Route::post('/sync/users', [CloudSyncController::class, 'user']);
         Route::post('/sync/employees', [CloudSyncController::class, 'employee']);
+        Route::post('/sync/orders', [CloudSyncController::class, 'order']);
+        Route::post('/sync/order-status', [CloudSyncController::class, 'orderStatus']);
     });
 
     Route::middleware('auth')->group(function () {

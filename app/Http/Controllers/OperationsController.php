@@ -81,7 +81,7 @@ class OperationsController extends Controller
         return response()->json($s->placeOrder($r->user(), $d['items'], $d['payment_method'], $d['idempotency_key']), 201);
     }
 
-    public function orderStatus(Request $r, Order $order)
+    public function orderStatus(Request $r, Order $order, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $d = $r->validate(['status' => 'required|in:dispatched,delivered']);
@@ -90,6 +90,7 @@ class OperationsController extends Controller
         }if ($d['status'] === 'delivered' && $order->status !== 'dispatched') {
             abort(422, 'Order must be dispatched.');
         }$order->update(['status' => $d['status'], $d['status'].'_at' => now()]);
+        $outbox->queueOrderStatus($order->fresh(), $r->user());
 
         return $order->fresh(['items', 'customer']);
     }

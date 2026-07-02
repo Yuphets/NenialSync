@@ -97,6 +97,7 @@ class OfflineSyncTest extends TestCase
                 'created_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(),
             ]]),
             'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
+            'https://cloud.example/api/sync/orders' => Http::response([]),
         ]);
 
         $result = app(LocalSyncService::class)->run();
@@ -106,7 +107,61 @@ class OfflineSyncTest extends TestCase
         $this->assertDatabaseHas('sync_outbox', ['event_id' => $eventId, 'status' => 'synced']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud_inventory_activity']);
-        Http::assertSentCount(4);
+        Http::assertSentCount(5);
+    }
+
+    public function test_local_worker_imports_cloud_orders_for_fulfillment(): void
+    {
+        config([
+            'offline.enabled' => true,
+            'offline.node_id' => 'store-main',
+            'offline.cloud_url' => 'https://cloud.example',
+            'offline.sync_token' => 'sync-secret',
+        ]);
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
+        $product = Product::first();
+        $orderKey = (string) Str::uuid();
+        Http::fake([
+            'https://cloud.example/api/sync/products' => Http::response(Product::all()->toArray()),
+            'https://cloud.example/api/sync/inventory-activity' => Http::response([]),
+            'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
+            'https://cloud.example/api/sync/orders' => Http::response([[
+                'reference' => 'WEB-CLOUD-001', 'idempotency_key' => $orderKey,
+                'customer_email' => $customer->email, 'status' => 'preparing', 'payment_status' => 'on_hold',
+                'payment_method' => 'protected', 'payment_reference' => null,
+                'subtotal' => 285, 'discount_total' => 0, 'vat_rate' => 0.12,
+                'vatable_sales' => 254.46, 'vat_amount' => 30.54, 'total' => 285,
+                'dispatched_at' => null, 'delivered_at' => null, 'received_at' => null, 'cancelled_at' => null,
+                'created_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(),
+                'items' => [[
+                    'product_name' => $product->name, 'sku' => $product->sku, 'quantity' => 1,
+                    'unit_price' => 285, 'discount_percent' => 0, 'line_total' => 285,
+                    'created_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(),
+                ]],
+            ]]),
+        ]);
+
+        $result = app(LocalSyncService::class)->run();
+
+        $this->assertTrue($result['orders_synced']);
+        $this->assertDatabaseHas('orders', ['idempotency_key' => $orderKey, 'reference' => 'WEB-CLOUD-001']);
+        $this->assertDatabaseHas('order_items', ['sku' => $product->sku, 'quantity' => 1]);
+    }
+
+    public function test_local_order_and_fulfillment_changes_are_queued_for_cloud(): void
+    {
+        config(['offline.enabled' => true]);
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
+        $product = Product::first();
+        $response = $this->actingAs($customer)->postJson('/api/orders', [
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method' => 'protected', 'idempotency_key' => (string) Str::uuid(),
+        ])->assertCreated();
+        $admin = User::where('role', 'admin')->first();
+        $this->actingAs($admin)->putJson('/api/orders/'.$response->json('id').'/status', ['status' => 'dispatched'])->assertOk();
+
+        $this->assertDatabaseHas('sync_outbox', ['event_type' => 'order.placed', 'status' => 'pending']);
+        $this->assertDatabaseHas('sync_outbox', ['event_type' => 'order.status_updated', 'status' => 'pending']);
     }
 
     private function salePayload(Product $product, int $quantity): array

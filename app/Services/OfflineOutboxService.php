@@ -5,12 +5,50 @@ namespace App\Services;
 use App\Models\AttendanceRecord;
 use App\Models\Sale;
 use App\Models\Employee;
+use App\Models\Order;
 use App\Models\User;
 use App\Models\SyncOutbox;
 use Illuminate\Support\Str;
 
 class OfflineOutboxService
 {
+    public function queueOrderPlaced(Order $order): void
+    {
+        if (! config('offline.enabled')) return;
+        $order->loadMissing('items', 'customer');
+        SyncOutbox::firstOrCreate(
+            ['event_type' => 'order.placed', 'aggregate_type' => Order::class, 'aggregate_id' => $order->id],
+            [
+                'event_id' => $order->idempotency_key,
+                'payload' => [
+                    'customer_email' => $order->customer->email,
+                    'payment_method' => $order->payment_method,
+                    'items' => $order->items->map(fn ($item) => ['sku' => $item->sku, 'quantity' => $item->quantity])->values()->all(),
+                ],
+            ]
+        );
+    }
+
+    public function queueOrderStatus(Order $order, User $actor): void
+    {
+        if (! config('offline.enabled')) return;
+        SyncOutbox::create([
+            'event_id' => (string) Str::uuid(),
+            'event_type' => 'order.status_updated',
+            'aggregate_type' => Order::class,
+            'aggregate_id' => $order->id,
+            'payload' => [
+                'idempotency_key' => $order->idempotency_key,
+                'actor_email' => $actor->email,
+                'status' => $order->status,
+                'dispatched_at' => $order->dispatched_at?->toIso8601String(),
+                'delivered_at' => $order->delivered_at?->toIso8601String(),
+                'received_at' => $order->received_at?->toIso8601String(),
+                'cancelled_at' => $order->cancelled_at?->toIso8601String(),
+            ],
+        ]);
+    }
+
     public function queueUser(User $user): void
     {
         $this->queue('user.account_updated', User::class, $user->id, [
