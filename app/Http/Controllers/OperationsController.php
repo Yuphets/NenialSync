@@ -300,24 +300,25 @@ class OperationsController extends Controller
     {
         abort_unless($r->user()->role === 'admin', 403);
 
-        return Device::orderBy('name')->get();
+        return Device::where('is_active', true)->orderBy('name')->get();
     }
 
-    public function deviceStore(Request $r)
+    public function deviceStore(Request $r, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin', 403);
         $d = $r->validate(['name' => 'required|string', 'type' => 'required|in:facial,facial_mobile,barcode,pos', 'location' => 'nullable|string', 'provider' => 'nullable|string', 'external_id' => 'nullable|string|unique:devices', 'configuration' => 'nullable|array']);
         $token = Str::random(64);
         $device = Device::create([...$d, 'token_hash' => hash('sha256', $token), 'is_active' => true]);
+        $outbox->queueDevice($device);
 
         return response()->json(['device' => $device, 'token' => $token], 201);
     }
 
-    public function deviceDestroy(Request $r, Device $device)
+    public function deviceDestroy(Request $r, Device $device, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin', 403);
         $device->update(['is_active' => false]);
-        $device->delete();
+        $outbox->queueDevice($device->fresh());
 
         return response()->noContent();
     }

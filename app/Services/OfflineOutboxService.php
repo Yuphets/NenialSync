@@ -6,12 +6,27 @@ use App\Models\AttendanceRecord;
 use App\Models\Sale;
 use App\Models\Employee;
 use App\Models\Order;
+use App\Models\Device;
 use App\Models\User;
 use App\Models\SyncOutbox;
 use Illuminate\Support\Str;
 
 class OfflineOutboxService
 {
+    public function queueDevice(Device $device): void
+    {
+        $this->queue('device.updated', Device::class, $device->id, [
+            'name' => $device->name,
+            'type' => $device->type,
+            'location' => $device->location,
+            'provider' => $device->provider,
+            'external_id' => $device->external_id,
+            'configuration' => $device->configuration,
+            'token_hash' => $device->getRawOriginal('token_hash'),
+            'is_active' => $device->is_active,
+        ]);
+    }
+
     public function queueOrderPlaced(Order $order): void
     {
         if (! config('offline.enabled')) return;

@@ -25,6 +25,7 @@ Route::prefix('api')->group(function () {
         Route::post('/sync/employees', [CloudSyncController::class, 'employee']);
         Route::post('/sync/orders', [CloudSyncController::class, 'order']);
         Route::post('/sync/order-status', [CloudSyncController::class, 'orderStatus']);
+        Route::post('/sync/devices', [CloudSyncController::class, 'device']);
     });
 
     Route::middleware('auth')->group(function () {

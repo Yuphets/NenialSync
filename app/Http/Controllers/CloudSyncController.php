@@ -56,6 +56,7 @@ class CloudSyncController extends Controller
     public function configuration()
     {
         return [
+            'capabilities' => ['device_sync' => true],
             'users' => User::orderBy('email')->get()->map(fn (User $user) => [
                 'name' => $user->name, 'email' => $user->email,
                 'password_hash' => $user->getRawOriginal('password'), 'role' => $user->role,
@@ -173,6 +174,34 @@ class CloudSyncController extends Controller
         ]);
 
         return response()->json($order->fresh(['items', 'customer']), 201);
+    }
+
+    public function device(Request $request)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80', 'event_id' => 'required|uuid',
+            'payload.name' => 'required|string|max:255',
+            'payload.type' => 'required|in:facial,facial_mobile,barcode,pos',
+            'payload.location' => 'nullable|string|max:255', 'payload.provider' => 'nullable|string|max:255',
+            'payload.external_id' => 'nullable|string|max:255', 'payload.configuration' => 'nullable|array',
+            'payload.token_hash' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/'],
+            'payload.is_active' => 'required|boolean',
+        ]);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return Device::findOrFail($receipt->result_id);
+        }
+
+        $payload = $data['payload'];
+        $identity = $payload['external_id']
+            ? ['external_id' => $payload['external_id']]
+            : ['name' => $payload['name'], 'type' => $payload['type']];
+        $device = Device::updateOrCreate($identity, $payload);
+        SyncReceipt::create([
+            'node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'device.updated',
+            'result_type' => Device::class, 'result_id' => $device->id, 'received_at' => now(),
+        ]);
+
+        return response()->json($device, 201);
     }
 
     public function attendance(Request $request)

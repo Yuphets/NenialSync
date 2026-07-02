@@ -18,6 +18,8 @@ use RuntimeException;
 
 class LocalSyncService
 {
+    public function __construct(private readonly OfflineOutboxService $outbox) {}
+
     public function run(): array
     {
         $this->assertConfigured();
@@ -70,6 +72,11 @@ class LocalSyncService
         } catch (ConnectionException) {
             $configuration = null;
             $accountSync = false;
+        }
+
+        if ($accountSync && data_get($configuration->json(), 'capabilities.device_sync') && ! SyncState::where('key', 'local_device_bootstrap')->exists()) {
+            Device::orderBy('id')->each(fn (Device $device) => $this->outbox->queueDevice($device));
+            SyncState::create(['key' => 'local_device_bootstrap', 'value' => ['queued_at' => now()->toIso8601String()], 'last_synced_at' => null]);
         }
 
         try {
@@ -137,6 +144,7 @@ class LocalSyncService
             'employee.updated' => '/api/sync/employees',
             'order.placed' => '/api/sync/orders',
             'order.status_updated' => '/api/sync/order-status',
+            'device.updated' => '/api/sync/devices',
             default => throw new RuntimeException("Unsupported sync event {$event->event_type}."),
         };
 

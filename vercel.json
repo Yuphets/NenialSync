@@ -12,8 +12,11 @@
   "routes": [
     { "src": "/build/(.*)", "dest": "/public/build/$1" },
     { "src": "/media/(.*)", "dest": "/public/media/$1" },
+    { "src": "/face-models/(.*)", "dest": "/public/face-models/$1", "headers": { "Cache-Control": "public, max-age=86400" } },
+    { "src": "/responsive.css", "dest": "/public/responsive.css", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
     { "src": "/sw.js", "dest": "/public/sw.js", "headers": { "Cache-Control": "public, max-age=0, must-revalidate" } },
     { "src": "/manifest.webmanifest", "dest": "/public/manifest.webmanifest" },
+    { "src": "/face-manifest.webmanifest", "dest": "/public/face-manifest.webmanifest" },
     { "src": "/favicon.ico", "dest": "/public/favicon.ico" },
     { "src": "/(.*)", "dest": "/api/index.php" }
   ]

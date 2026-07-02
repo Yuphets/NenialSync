@@ -1,5 +1,5 @@
-const CACHE = 'nenial-shell-v3';
-const SHELL = ['/', '/responsive.css', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
+const CACHE = 'nenial-shell-v4';
+const SHELL = ['/', '/responsive.css?v=20260702-2', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
 
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
@@ -26,7 +26,16 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    if (url.pathname === '/responsive.css' || url.pathname.startsWith('/build/') || url.pathname.startsWith('/media/') || url.pathname.startsWith('/face-models/')) {
+    if (url.pathname === '/responsive.css' || url.pathname.startsWith('/build/')) {
+        event.respondWith(fetch(request).then(response => {
+            const copy = response.clone();
+            caches.open(CACHE).then(cache => cache.put(request, copy));
+            return response;
+        }).catch(() => caches.match(request)));
+        return;
+    }
+
+    if (url.pathname.startsWith('/media/') || url.pathname.startsWith('/face-models/')) {
         event.respondWith(caches.match(request).then(cached => cached || fetch(request).then(response => {
             const copy = response.clone();
             caches.open(CACHE).then(cache => cache.put(request, copy));

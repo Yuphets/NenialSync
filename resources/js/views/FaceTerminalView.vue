@@ -75,15 +75,16 @@ async function loadModels() {
 async function connect() {
     busy.value = true;
     try {
-        await loadModels();
         const { data } = await axios.get('/api/device/employees', { headers: { Authorization: `Bearer ${token.value}` } });
+        status.value = 'Device authenticated. Loading on-device recognition modelsâ€¦';
+        await loadModels();
         employees.value = data;
         localStorage.setItem('nenial-face-device-token', token.value);
         enrolled.value = await templates();
         connected.value = true;
         status.value = `${data.length} employees loaded. Start the camera or enroll a face.`;
     } catch (error) {
-        status.value = error.response?.data?.message || 'Unable to connect. Verify the device token and server.';
+        status.value = error.response?.data?.message || error.message || 'Unable to connect. Verify the device token and server.';
     } finally { busy.value = false; }
 }
 

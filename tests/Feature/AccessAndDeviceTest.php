@@ -49,7 +49,21 @@ class AccessAndDeviceTest extends TestCase
         $device = Device::create(['name' => 'Mistaken device', 'type' => 'facial_mobile', 'token_hash' => hash('sha256', Str::random(64)), 'is_active' => true]);
 
         $this->actingAs($admin)->deleteJson("/api/devices/{$device->id}")->assertNoContent();
-        $this->assertDatabaseMissing('devices', ['id' => $device->id]);
+        $this->assertDatabaseHas('devices', ['id' => $device->id, 'is_active' => false]);
+    }
+
+    public function test_local_mobile_device_registration_is_queued_for_cloud(): void
+    {
+        config(['offline.enabled' => true]);
+        $admin = User::where('role', 'admin')->first();
+        $response = $this->actingAs($admin)->postJson('/api/devices', [
+            'name' => 'Owner phone', 'type' => 'facial_mobile', 'location' => 'Main entrance',
+            'provider' => 'Nenial Mobile', 'external_id' => 'PHONE-001',
+        ])->assertCreated()->assertJsonStructure(['device', 'token']);
+
+        $this->assertDatabaseHas('sync_outbox', [
+            'event_type' => 'device.updated', 'aggregate_id' => $response->json('device.id'), 'status' => 'pending',
+        ]);
     }
 
     public function test_logout_returns_the_rotated_csrf_token(): void
