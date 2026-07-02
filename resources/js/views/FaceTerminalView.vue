@@ -15,10 +15,12 @@ const running = ref(false);
 const busy = ref(false);
 const lastResult = ref(null);
 const enrolled = ref([]);
+const livenessUi = ref({ visible: false, title: 'Ready', instruction: 'Position one face inside the frame.', progress: 0 });
 let stream = null;
 let timer = null;
 let modelsReady = false;
 let liveness = null;
+let missedFrames = 0;
 const lastSubmitted = new Map();
 const manifestLink = document.querySelector('link[rel="manifest"]');
 const originalManifest = manifestLink?.getAttribute('href');
@@ -102,7 +104,8 @@ async function startCamera() {
 }
 
 function stopCamera() {
-    clearTimeout(timer); timer = null; running.value = false; liveness = null;
+    clearTimeout(timer); timer = null; running.value = false; liveness = null; missedFrames = 0;
+    livenessUi.value = { visible: false, title: 'Ready', instruction: 'Position one face inside the frame.', progress: 0 };
     stream?.getTracks().forEach(track => track.stop()); stream = null;
 }
 
@@ -151,7 +154,13 @@ async function loop() {
     try {
         const result = await descriptor();
         draw(result);
-        if (result && enrolled.value.length && !busy.value) await recognize(result);
+        if (result && enrolled.value.length && !busy.value) {
+            missedFrames = 0;
+            await recognize(result);
+        } else if (!result && enrolled.value.length && !busy.value && ++missedFrames >= 3) {
+            liveness = null;
+            livenessUi.value = { visible: true, title: 'Looking for a face', instruction: 'Center your face and use even front lighting.', progress: 0 };
+        }
     } catch (error) { status.value = `Recognition paused: ${error.message}`; }
     timer = setTimeout(loop, 100);
 }
@@ -178,9 +187,15 @@ async function recognize(result) {
         && match?.profile.subject_id === liveness.subject_id
         && Date.now() - liveness.started <= 30000
         && match.distance <= 0.62;
-    if (!match || (match.distance > 0.5 && !continuingLiveness)) { liveness = null; status.value = 'Face not recognized.'; return; }
+    if (!match || (match.distance > 0.5 && !continuingLiveness)) {
+        liveness = null;
+        status.value = 'Face not recognized.';
+        livenessUi.value = { visible: true, title: 'Face not recognized', instruction: 'Face forward, move slightly closer, and try again.', progress: 0 };
+        return;
+    }
     if (Date.now() - (lastSubmitted.get(match.profile.subject_id) || 0) < 60000) {
         status.value = `${match.profile.employee_name}: attendance already recorded.`;
+        livenessUi.value = { visible: true, title: 'Already recorded', instruction: 'Attendance was already captured recently.', progress: 100 };
         return;
     }
     const confidence = Math.max(0, Math.min(100, (1 - match.distance) * 100));
@@ -190,7 +205,7 @@ async function recognize(result) {
     const headTurn = headTurnRatio(result.landmarks);
     if (!Number.isFinite(ear)) return;
     if (!liveness || liveness.subject_id !== match.profile.subject_id || Date.now() - liveness.started > 30000) {
-        liveness = { subject_id: match.profile.subject_id, started: Date.now(), phaseStarted: Date.now(), phase: 'calibrating', samples: [], headSamples: [], closedFrames: 0, reopenedFrames: 0, turnFrames: 0, centerFrames: 0, baseline: null, headBaseline: null };
+        liveness = { subject_id: match.profile.subject_id, started: Date.now(), phase: 'calibrating', samples: [], headSamples: [], closedFrames: 0, reopenedFrames: 0, turnFrames: 0, centerFrames: 0, baseline: null, headBaseline: null };
     }
 
     if (liveness.phase === 'calibrating') {
@@ -198,45 +213,38 @@ async function recognize(result) {
             liveness.samples.push(ear);
             liveness.headSamples.push(headTurn);
         }
-        status.value = `${match.profile.employee_name}: keep both eyes open while liveness calibrates (${Math.min(liveness.samples.length, 5)}/5).`;
-        if (liveness.samples.length >= 5) {
+        const calibrationCount = Math.min(liveness.samples.length, 4);
+        status.value = `${match.profile.employee_name}: hold still while the camera calibrates (${calibrationCount}/4).`;
+        livenessUi.value = { visible: true, title: `Hello, ${match.profile.employee_name}`, instruction: 'Face forward and hold still for a moment.', progress: calibrationCount * 6 };
+        if (liveness.samples.length >= 4) {
             const strongest = [...liveness.samples].sort((a, b) => b - a).slice(0, 3);
             liveness.baseline = strongest.reduce((sum, value) => sum + value, 0) / strongest.length;
             liveness.headBaseline = liveness.headSamples.reduce((sum, value) => sum + value, 0) / liveness.headSamples.length;
-            liveness.phase = 'waiting_for_close';
-            liveness.phaseStarted = Date.now();
-            status.value = `${match.profile.employee_name}: close both eyes briefly, then reopen them.`;
+            liveness.phase = 'waiting_for_gesture';
+            status.value = `${match.profile.employee_name}: blink once or slowly turn your head to either side.`;
+            livenessUi.value = { visible: true, title: 'Liveness check', instruction: 'Blink once, or slowly turn your head to either side.', progress: 30 };
         }
         return;
     }
 
-    const closeThreshold = Math.max(0.07, liveness.baseline * 0.72);
-    const reopenThreshold = Math.max(closeThreshold + 0.015, liveness.baseline * 0.86);
-    if (liveness.phase === 'waiting_for_close') {
+    const closeThreshold = Math.max(0.07, liveness.baseline * 0.78);
+    const reopenThreshold = Math.max(closeThreshold + 0.015, liveness.baseline * 0.88);
+    if (liveness.phase === 'waiting_for_gesture') {
         liveness.baseline = Math.max(liveness.baseline * 0.995, ear);
         if (ear < closeThreshold) liveness.closedFrames += 1;
         else liveness.closedFrames = 0;
-        status.value = liveness.closedFrames
-            ? `${match.profile.employee_name}: eyes closing… hold briefly.`
-            : `${match.profile.employee_name}: close both eyes briefly, then reopen them.`;
+        if (Math.abs(headTurn - liveness.headBaseline) >= 0.12) liveness.turnFrames += 1;
+        else liveness.turnFrames = 0;
+        status.value = `${match.profile.employee_name}: blink once or slowly turn your head to either side.`;
+        livenessUi.value = { visible: true, title: 'Liveness check', instruction: 'Blink once, or slowly turn your head to either side.', progress: 35 };
         if (liveness.closedFrames >= 2) {
             liveness.phase = 'waiting_for_reopen';
             status.value = `${match.profile.employee_name}: blink detected. Open both eyes.`;
-        } else if (Date.now() - liveness.phaseStarted >= 5000) {
-            liveness.phase = 'waiting_for_turn';
-            liveness.phaseStarted = Date.now();
-            status.value = `${match.profile.employee_name}: blink signal was unclear. Slowly turn your head to either side.`;
-        }
-        return;
-    }
-
-    if (liveness.phase === 'waiting_for_turn') {
-        if (Math.abs(headTurn - liveness.headBaseline) >= 0.16) liveness.turnFrames += 1;
-        else liveness.turnFrames = 0;
-        status.value = `${match.profile.employee_name}: slowly turn your head to either side.`;
-        if (liveness.turnFrames >= 2) {
+            livenessUi.value = { visible: true, title: 'Blink detected', instruction: 'Open both eyes to finish.', progress: 72 };
+        } else if (liveness.turnFrames >= 2) {
             liveness.phase = 'waiting_for_center';
             status.value = `${match.profile.employee_name}: head turn detected. Face forward again.`;
+            livenessUi.value = { visible: true, title: 'Movement detected', instruction: 'Face forward again to finish.', progress: 72 };
         }
         return;
     }
@@ -245,6 +253,7 @@ async function recognize(result) {
         if (Math.abs(headTurn - liveness.headBaseline) <= 0.08) liveness.centerFrames += 1;
         else liveness.centerFrames = 0;
         status.value = liveness.centerFrames ? 'Liveness confirmed. Recording attendance…' : `${match.profile.employee_name}: face forward to finish.`;
+        livenessUi.value = { visible: true, title: liveness.centerFrames ? 'Verified' : 'Face forward', instruction: liveness.centerFrames ? 'Recording attendance…' : 'Return to the center position.', progress: liveness.centerFrames ? 100 : 78 };
         if (liveness.centerFrames >= 2) await submitAttendance(match.profile, confidence);
         return;
     }
@@ -252,6 +261,7 @@ async function recognize(result) {
     if (ear > reopenThreshold) liveness.reopenedFrames += 1;
     else liveness.reopenedFrames = 0;
     status.value = liveness.reopenedFrames ? 'Liveness confirmed. Recording attendance…' : `${match.profile.employee_name}: open both eyes to finish.`;
+    livenessUi.value = { visible: true, title: liveness.reopenedFrames ? 'Verified' : 'Open your eyes', instruction: liveness.reopenedFrames ? 'Recording attendance…' : 'Look at the camera to finish.', progress: liveness.reopenedFrames ? 100 : 78 };
     if (liveness.reopenedFrames >= 2) await submitAttendance(match.profile, confidence);
 }
 
@@ -260,9 +270,10 @@ async function submitAttendance(profile, confidence) {
     try {
         const eventId = crypto.randomUUID();
         const { data } = await axios.post('/api/device/attendance', { subject_id: profile.subject_id, event_id: eventId, recognized_at: new Date().toISOString(), confidence: Number(confidence.toFixed(2)), status: 'present' }, { headers: { Authorization: `Bearer ${token.value}` } });
-        lastResult.value = { name: profile.employee_name, time: new Date(data.recognized_at).toLocaleString(), confidence: confidence.toFixed(1) };
+        lastResult.value = { name: profile.employee_name, time: new Date(data.recognized_at).toLocaleString('en-US'), confidence: confidence.toFixed(1) };
         lastSubmitted.set(profile.subject_id, Date.now());
         status.value = `Attendance recorded for ${profile.employee_name}.`;
+        livenessUi.value = { visible: true, title: 'Attendance recorded', instruction: `${profile.employee_name} may step away.`, progress: 100 };
         liveness = null;
         await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (error) { status.value = error.response?.data?.message || 'Attendance submission failed; the terminal will keep running.'; } finally { busy.value = false; }
@@ -279,4 +290,4 @@ onBeforeUnmount(() => {
 onBeforeRouteLeave(to => to.path === '/' ? '/app/dashboard' : true);
 </script>
 
-<template><main class="face-terminal"><header><div><span class="eyebrow">Nenial Attendance</span><h1>Facial Recognition Terminal</h1></div><RouterLink class="btn" to="/">Exit terminal</RouterLink></header><p class="terminal-status" :class="{ connected }">{{ status }}</p><section v-if="!connected" class="terminal-connect"><label>Facial device token<input v-model="token" type="password" autocomplete="off" placeholder="Paste the one-time device token"></label><button class="btn primary" :disabled="busy || !token" @click="connect">{{ busy ? 'Loading…' : 'Connect terminal' }}</button><small>Use this page on <b>localhost</b> or behind HTTPS. The token and facial descriptors remain on this terminal.</small></section><template v-else><div class="terminal-grid"><section class="camera-stage"><video ref="video" muted playsinline></video><canvas ref="canvas"></canvas><div v-if="!running" class="camera-placeholder">Camera is off</div><button v-if="!running" class="btn primary" @click="startCamera">Start camera</button><button v-else class="btn" @click="stopCamera">Stop camera</button></section><aside><section class="terminal-card"><h2>Enroll employee</h2><label>Employee<select v-model="selectedSubject"><option value="">Choose employee</option><option v-for="employee in employees" :key="employee.face_subject_id" :value="employee.face_subject_id">{{ employee.name }} · {{ employee.employee_number }}</option></select></label><button class="btn primary full" :disabled="busy || !selectedSubject" @click="enroll">Capture three samples</button><small>Obtain employee consent. Enrollment stores numerical descriptors only in this browser.</small></section><section v-if="lastResult" class="terminal-card success"><h2>Attendance recorded</h2><strong>{{ lastResult.name }}</strong><span>{{ lastResult.time }}</span><small>Match confidence {{ lastResult.confidence }}%</small></section><section class="terminal-card"><h2>Local enrollments</h2><div v-if="!enrolled.length" class="empty">No employees enrolled on this terminal.</div><div v-for="profile in enrolled" :key="profile.subject_id" class="enrollment"><span><strong>{{ profile.employee_name }}</strong><small>{{ profile.descriptors.length }} samples</small></span><button class="btn tiny danger" @click="forget(profile)">Remove</button></div></section></aside></div></template></main></template>
+<template><main class="face-terminal"><header><div><span class="eyebrow">Nenial Attendance</span><h1>Facial Recognition Terminal</h1></div><RouterLink class="btn" to="/">Exit terminal</RouterLink></header><p class="terminal-status" :class="{ connected }">{{ status }}</p><section v-if="!connected" class="terminal-connect"><label>Facial device token<input v-model="token" type="password" autocomplete="off" placeholder="Paste the one-time device token"></label><button class="btn primary" :disabled="busy || !token" @click="connect">{{ busy ? 'Loading…' : 'Connect terminal' }}</button><small>Use this page on <b>localhost</b> or behind HTTPS. The token and facial descriptors remain on this terminal.</small></section><template v-else><div class="terminal-grid"><section class="camera-stage"><video ref="video" muted playsinline></video><canvas ref="canvas"></canvas><div v-if="running && livenessUi.visible" class="liveness-guide"><strong>{{ livenessUi.title }}</strong><span>{{ livenessUi.instruction }}</span><div class="liveness-progress"><i :style="{ width: `${livenessUi.progress}%` }"></i></div></div><div v-if="!running" class="camera-placeholder">Camera is off</div><button v-if="!running" class="btn primary" @click="startCamera">Start camera</button><button v-else class="btn" @click="stopCamera">Stop camera</button></section><aside><section class="terminal-card"><h2>Enroll employee</h2><label>Employee<select v-model="selectedSubject"><option value="">Choose employee</option><option v-for="employee in employees" :key="employee.face_subject_id" :value="employee.face_subject_id">{{ employee.name }} · {{ employee.employee_number }}</option></select></label><button class="btn primary full" :disabled="busy || !selectedSubject" @click="enroll">Capture three samples</button><small>Obtain employee consent. Enrollment stores numerical descriptors only in this browser.</small></section><section v-if="lastResult" class="terminal-card success"><h2>Attendance recorded</h2><strong>{{ lastResult.name }}</strong><span>{{ lastResult.time }}</span><small>Match confidence {{ lastResult.confidence }}%</small></section><section class="terminal-card"><h2>Local enrollments</h2><div v-if="!enrolled.length" class="empty">No employees enrolled on this terminal.</div><div v-for="profile in enrolled" :key="profile.subject_id" class="enrollment"><span><strong>{{ profile.employee_name }}</strong><small>{{ profile.descriptors.length }} samples</small></span><button class="btn tiny danger" @click="forget(profile)">Remove</button></div></section></aside></div></template></main></template>

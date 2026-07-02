@@ -98,6 +98,7 @@ class OfflineSyncTest extends TestCase
             ]]),
             'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
             'https://cloud.example/api/sync/orders' => Http::response([]),
+            'https://cloud.example/api/sync/attendance' => Http::response([]),
         ]);
 
         $result = app(LocalSyncService::class)->run();
@@ -107,7 +108,7 @@ class OfflineSyncTest extends TestCase
         $this->assertDatabaseHas('sync_outbox', ['event_id' => $eventId, 'status' => 'synced']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud_inventory_activity']);
-        Http::assertSentCount(5);
+        Http::assertSentCount(6);
     }
 
     public function test_local_worker_imports_cloud_orders_for_fulfillment(): void
@@ -139,6 +140,7 @@ class OfflineSyncTest extends TestCase
                     'created_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(),
                 ]],
             ]]),
+            'https://cloud.example/api/sync/attendance' => Http::response([]),
         ]);
 
         $result = app(LocalSyncService::class)->run();
@@ -146,6 +148,40 @@ class OfflineSyncTest extends TestCase
         $this->assertTrue($result['orders_synced']);
         $this->assertDatabaseHas('orders', ['idempotency_key' => $orderKey, 'reference' => 'WEB-CLOUD-001']);
         $this->assertDatabaseHas('order_items', ['sku' => $product->sku, 'quantity' => 1]);
+    }
+
+    public function test_local_worker_imports_cloud_attendance(): void
+    {
+        config([
+            'offline.enabled' => true,
+            'offline.node_id' => 'store-main',
+            'offline.cloud_url' => 'https://cloud.example',
+            'offline.sync_token' => 'sync-secret',
+        ]);
+        $employee = \App\Models\Employee::first();
+        $recognizedAt = now()->setMicrosecond(0);
+        Http::fake([
+            'https://cloud.example/api/sync/products' => Http::response(Product::all()->toArray()),
+            'https://cloud.example/api/sync/inventory-activity' => Http::response([]),
+            'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
+            'https://cloud.example/api/sync/orders' => Http::response([]),
+            'https://cloud.example/api/sync/attendance' => Http::response([[
+                'employee_number' => $employee->employee_number,
+                'device_external_id' => null, 'device_name' => null, 'device_type' => null,
+                'attendance_date' => $recognizedAt->format('Y-m-d'), 'status' => 'present',
+                'recognized_at' => $recognizedAt->toIso8601String(), 'match_confidence' => 96.5,
+                'provider_event_id' => 'cloud-face-001', 'metadata' => ['source' => 'mobile'],
+                'created_at' => $recognizedAt->toIso8601String(), 'updated_at' => $recognizedAt->toIso8601String(),
+            ]]),
+        ]);
+
+        $result = app(LocalSyncService::class)->run();
+
+        $this->assertTrue($result['attendance_synced']);
+        $record = \App\Models\AttendanceRecord::where('provider_event_id', 'cloud-face-001')->firstOrFail();
+        $this->assertSame($employee->id, $record->employee_id);
+        $this->assertSame($recognizedAt->format('Y-m-d'), $record->attendance_date->format('Y-m-d'));
+        $this->assertSame('present', $record->status);
     }
 
     public function test_local_order_and_fulfillment_changes_are_queued_for_cloud(): void

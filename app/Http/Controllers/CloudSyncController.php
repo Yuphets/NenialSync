@@ -53,6 +53,27 @@ class CloudSyncController extends Controller
             ]);
     }
 
+    public function attendances()
+    {
+        return AttendanceRecord::with(['employee:id,employee_number', 'device:id,name,type,external_id'])
+            ->orderBy('id')
+            ->get()
+            ->map(fn (AttendanceRecord $record) => [
+                'employee_number' => $record->employee->employee_number,
+                'device_external_id' => $record->device?->external_id,
+                'device_name' => $record->device?->name,
+                'device_type' => $record->device?->type,
+                'attendance_date' => $record->attendance_date->format('Y-m-d'),
+                'status' => $record->status,
+                'recognized_at' => $record->recognized_at?->toIso8601String(),
+                'match_confidence' => $record->match_confidence,
+                'provider_event_id' => $record->provider_event_id,
+                'metadata' => $record->metadata,
+                'created_at' => $record->created_at?->toIso8601String(),
+                'updated_at' => $record->updated_at?->toIso8601String(),
+            ]);
+    }
+
     public function configuration()
     {
         return [

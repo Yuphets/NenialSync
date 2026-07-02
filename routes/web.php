@@ -18,6 +18,7 @@ Route::prefix('api')->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
         Route::get('/sync/inventory-activity', [CloudSyncController::class, 'inventoryActivity']);
         Route::get('/sync/orders', [CloudSyncController::class, 'orders']);
+        Route::get('/sync/attendance', [CloudSyncController::class, 'attendances']);
         Route::get('/sync/configuration', [CloudSyncController::class, 'configuration']);
         Route::post('/sync/sales', [CloudSyncController::class, 'sale']);
         Route::post('/sync/attendance', [CloudSyncController::class, 'attendance']);

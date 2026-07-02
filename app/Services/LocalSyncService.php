@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\Device;
 use App\Models\Employee;
 use App\Models\Order;
+use App\Models\AttendanceRecord;
 use App\Models\User;
 use App\Models\SyncConflict;
 use App\Models\SyncOutbox;
@@ -87,7 +88,15 @@ class LocalSyncService
             $orderSync = false;
         }
 
-        DB::transaction(function () use ($products, $configuration, $accountSync, $orders, $orderSync) {
+        try {
+            $attendance = $this->client()->get($this->url('/api/sync/attendance'));
+            $attendanceSync = $attendance->successful();
+        } catch (ConnectionException) {
+            $attendance = null;
+            $attendanceSync = false;
+        }
+
+        DB::transaction(function () use ($products, $configuration, $accountSync, $orders, $orderSync, $attendance, $attendanceSync) {
             foreach ($products->json() as $remote) {
                 $product = Product::withTrashed()->firstOrNew(['sku' => $remote['sku']]);
                 $product->fill(collect($remote)->only([
@@ -100,9 +109,10 @@ class LocalSyncService
 
             if ($accountSync) $this->applyConfiguration($configuration->json());
             if ($orderSync) $this->applyOrders($orders->json());
+            if ($attendanceSync) $this->applyAttendance($attendance->json());
         });
 
-        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'activity_synced' => $activitySync, 'orders_synced' => $orderSync], 'last_synced_at' => now()]);
+        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync], 'last_synced_at' => now()]);
         if ($activitySync) {
             SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
         }
@@ -110,6 +120,7 @@ class LocalSyncService
         $message = match (true) {
             ! $accountSync => 'Inventory synced. Deploy the latest cloud release to enable account and workforce synchronization.',
             ! $orderSync => 'Inventory synced. Deploy the latest cloud release to enable order synchronization.',
+            ! $attendanceSync => 'Store data synced. Deploy the latest cloud release to enable attendance synchronization.',
             ! $activitySync => 'Inventory totals synced. Deploy the latest cloud release to enable the shared activity feed.',
             default => null,
         };
@@ -131,6 +142,7 @@ class LocalSyncService
             'accounts_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'accounts_synced', false),
             'activity_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'activity_synced', false),
             'orders_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'orders_synced', false),
+            'attendance_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'attendance_synced', false),
             'message' => $message,
         ];
     }
@@ -216,6 +228,32 @@ class LocalSyncService
                 }
                 $order->items()->create([...$item, 'product_id' => $productId]);
             }
+        }
+    }
+
+    private function applyAttendance(array $records): void
+    {
+        foreach ($records as $remote) {
+            $employeeId = Employee::withTrashed()->where('employee_number', $remote['employee_number'])->value('id');
+            if (! $employeeId) {
+                throw new RuntimeException("Cannot synchronize attendance: employee {$remote['employee_number']} is missing.");
+            }
+
+            $deviceId = null;
+            if ($remote['device_external_id'] ?? null) {
+                $deviceId = Device::where('external_id', $remote['device_external_id'])->value('id');
+            } elseif (($remote['device_name'] ?? null) && ($remote['device_type'] ?? null)) {
+                $deviceId = Device::where('name', $remote['device_name'])->where('type', $remote['device_type'])->value('id');
+            }
+
+            AttendanceRecord::updateOrCreate(
+                ['employee_id' => $employeeId, 'attendance_date' => $remote['attendance_date']],
+                [
+                    'device_id' => $deviceId, 'status' => $remote['status'],
+                    'recognized_at' => $remote['recognized_at'], 'match_confidence' => $remote['match_confidence'],
+                    'provider_event_id' => $remote['provider_event_id'], 'metadata' => $remote['metadata'],
+                ]
+            );
         }
     }
 }
