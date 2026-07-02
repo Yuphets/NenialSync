@@ -135,6 +135,17 @@ function eyeAspectRatio(points) {
     return (distance(points[1], points[5]) + distance(points[2], points[4])) / (2 * distance(points[0], points[3]));
 }
 
+function headTurnRatio(landmarks) {
+    const leftEye = landmarks.getLeftEye();
+    const rightEye = landmarks.getRightEye();
+    const averageX = points => points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    const leftX = averageX(leftEye);
+    const rightX = averageX(rightEye);
+    const eyeDistance = Math.abs(rightX - leftX);
+    const nose = landmarks.getNose()[3];
+    return eyeDistance > 0 ? (nose.x - ((leftX + rightX) / 2)) / eyeDistance : 0;
+}
+
 async function loop() {
     if (!running.value) return;
     try {
@@ -165,7 +176,7 @@ async function recognize(result) {
     }
     const continuingLiveness = liveness
         && match?.profile.subject_id === liveness.subject_id
-        && Date.now() - liveness.started <= 20000
+        && Date.now() - liveness.started <= 30000
         && match.distance <= 0.62;
     if (!match || (match.distance > 0.5 && !continuingLiveness)) { liveness = null; status.value = 'Face not recognized.'; return; }
     if (Date.now() - (lastSubmitted.get(match.profile.subject_id) || 0) < 60000) {
@@ -176,18 +187,24 @@ async function recognize(result) {
     const leftEar = eyeAspectRatio(result.landmarks.getLeftEye());
     const rightEar = eyeAspectRatio(result.landmarks.getRightEye());
     const ear = (leftEar + rightEar) / 2;
+    const headTurn = headTurnRatio(result.landmarks);
     if (!Number.isFinite(ear)) return;
-    if (!liveness || liveness.subject_id !== match.profile.subject_id || Date.now() - liveness.started > 20000) {
-        liveness = { subject_id: match.profile.subject_id, started: Date.now(), phase: 'calibrating', samples: [], closedFrames: 0, reopenedFrames: 0, baseline: null };
+    if (!liveness || liveness.subject_id !== match.profile.subject_id || Date.now() - liveness.started > 30000) {
+        liveness = { subject_id: match.profile.subject_id, started: Date.now(), phaseStarted: Date.now(), phase: 'calibrating', samples: [], headSamples: [], closedFrames: 0, reopenedFrames: 0, turnFrames: 0, centerFrames: 0, baseline: null, headBaseline: null };
     }
 
     if (liveness.phase === 'calibrating') {
-        if (ear >= 0.08 && ear <= 0.5) liveness.samples.push(ear);
+        if (ear >= 0.08 && ear <= 0.5) {
+            liveness.samples.push(ear);
+            liveness.headSamples.push(headTurn);
+        }
         status.value = `${match.profile.employee_name}: keep both eyes open while liveness calibrates (${Math.min(liveness.samples.length, 5)}/5).`;
         if (liveness.samples.length >= 5) {
             const strongest = [...liveness.samples].sort((a, b) => b - a).slice(0, 3);
             liveness.baseline = strongest.reduce((sum, value) => sum + value, 0) / strongest.length;
+            liveness.headBaseline = liveness.headSamples.reduce((sum, value) => sum + value, 0) / liveness.headSamples.length;
             liveness.phase = 'waiting_for_close';
+            liveness.phaseStarted = Date.now();
             status.value = `${match.profile.employee_name}: close both eyes briefly, then reopen them.`;
         }
         return;
@@ -205,7 +222,30 @@ async function recognize(result) {
         if (liveness.closedFrames >= 2) {
             liveness.phase = 'waiting_for_reopen';
             status.value = `${match.profile.employee_name}: blink detected. Open both eyes.`;
+        } else if (Date.now() - liveness.phaseStarted >= 5000) {
+            liveness.phase = 'waiting_for_turn';
+            liveness.phaseStarted = Date.now();
+            status.value = `${match.profile.employee_name}: blink signal was unclear. Slowly turn your head to either side.`;
         }
+        return;
+    }
+
+    if (liveness.phase === 'waiting_for_turn') {
+        if (Math.abs(headTurn - liveness.headBaseline) >= 0.16) liveness.turnFrames += 1;
+        else liveness.turnFrames = 0;
+        status.value = `${match.profile.employee_name}: slowly turn your head to either side.`;
+        if (liveness.turnFrames >= 2) {
+            liveness.phase = 'waiting_for_center';
+            status.value = `${match.profile.employee_name}: head turn detected. Face forward again.`;
+        }
+        return;
+    }
+
+    if (liveness.phase === 'waiting_for_center') {
+        if (Math.abs(headTurn - liveness.headBaseline) <= 0.08) liveness.centerFrames += 1;
+        else liveness.centerFrames = 0;
+        status.value = liveness.centerFrames ? 'Liveness confirmed. Recording attendance…' : `${match.profile.employee_name}: face forward to finish.`;
+        if (liveness.centerFrames >= 2) await submitAttendance(match.profile, confidence);
         return;
     }
 

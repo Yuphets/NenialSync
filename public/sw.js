@@ -1,5 +1,5 @@
-const CACHE = 'nenial-shell-v4';
-const SHELL = ['/', '/responsive.css?v=20260702-2', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
+const CACHE = 'nenial-shell-v5';
+const SHELL = ['/', '/responsive.css?v=20260702-3', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
 
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
