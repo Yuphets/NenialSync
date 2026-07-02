@@ -142,7 +142,7 @@ async function loop() {
         draw(result);
         if (result && enrolled.value.length && !busy.value) await recognize(result);
     } catch (error) { status.value = `Recognition paused: ${error.message}`; }
-    timer = setTimeout(loop, 300);
+    timer = setTimeout(loop, 100);
 }
 
 function draw(result) {
@@ -163,19 +163,56 @@ async function recognize(result) {
             if (!match || distance < match.distance) match = { profile, distance };
         }
     }
-    if (!match || match.distance > 0.5) { liveness = null; status.value = 'Face not recognized.'; return; }
+    const continuingLiveness = liveness
+        && match?.profile.subject_id === liveness.subject_id
+        && Date.now() - liveness.started <= 20000
+        && match.distance <= 0.62;
+    if (!match || (match.distance > 0.5 && !continuingLiveness)) { liveness = null; status.value = 'Face not recognized.'; return; }
     if (Date.now() - (lastSubmitted.get(match.profile.subject_id) || 0) < 60000) {
         status.value = `${match.profile.employee_name}: attendance already recorded.`;
         return;
     }
     const confidence = Math.max(0, Math.min(100, (1 - match.distance) * 100));
-    const eyes = [...result.landmarks.getLeftEye(), ...result.landmarks.getRightEye()];
-    const ear = (eyeAspectRatio(eyes.slice(0, 6)) + eyeAspectRatio(eyes.slice(6, 12))) / 2;
-    if (!liveness || liveness.subject_id !== match.profile.subject_id || Date.now() - liveness.started > 8000) liveness = { subject_id: match.profile.subject_id, started: Date.now(), open: false, closed: false };
-    if (ear > 0.22) liveness.open = true;
-    if (liveness.open && ear < 0.18) liveness.closed = true;
-    status.value = liveness.closed && ear > 0.22 ? 'Liveness confirmed. Recording attendance…' : `${match.profile.employee_name}: blink once to confirm liveness.`;
-    if (liveness.closed && ear > 0.22) await submitAttendance(match.profile, confidence);
+    const leftEar = eyeAspectRatio(result.landmarks.getLeftEye());
+    const rightEar = eyeAspectRatio(result.landmarks.getRightEye());
+    const ear = (leftEar + rightEar) / 2;
+    if (!Number.isFinite(ear)) return;
+    if (!liveness || liveness.subject_id !== match.profile.subject_id || Date.now() - liveness.started > 20000) {
+        liveness = { subject_id: match.profile.subject_id, started: Date.now(), phase: 'calibrating', samples: [], closedFrames: 0, reopenedFrames: 0, baseline: null };
+    }
+
+    if (liveness.phase === 'calibrating') {
+        if (ear >= 0.08 && ear <= 0.5) liveness.samples.push(ear);
+        status.value = `${match.profile.employee_name}: keep both eyes open while liveness calibrates (${Math.min(liveness.samples.length, 5)}/5).`;
+        if (liveness.samples.length >= 5) {
+            const strongest = [...liveness.samples].sort((a, b) => b - a).slice(0, 3);
+            liveness.baseline = strongest.reduce((sum, value) => sum + value, 0) / strongest.length;
+            liveness.phase = 'waiting_for_close';
+            status.value = `${match.profile.employee_name}: close both eyes briefly, then reopen them.`;
+        }
+        return;
+    }
+
+    const closeThreshold = Math.max(0.07, liveness.baseline * 0.72);
+    const reopenThreshold = Math.max(closeThreshold + 0.015, liveness.baseline * 0.86);
+    if (liveness.phase === 'waiting_for_close') {
+        liveness.baseline = Math.max(liveness.baseline * 0.995, ear);
+        if (ear < closeThreshold) liveness.closedFrames += 1;
+        else liveness.closedFrames = 0;
+        status.value = liveness.closedFrames
+            ? `${match.profile.employee_name}: eyes closing… hold briefly.`
+            : `${match.profile.employee_name}: close both eyes briefly, then reopen them.`;
+        if (liveness.closedFrames >= 2) {
+            liveness.phase = 'waiting_for_reopen';
+            status.value = `${match.profile.employee_name}: blink detected. Open both eyes.`;
+        }
+        return;
+    }
+
+    if (ear > reopenThreshold) liveness.reopenedFrames += 1;
+    else liveness.reopenedFrames = 0;
+    status.value = liveness.reopenedFrames ? 'Liveness confirmed. Recording attendance…' : `${match.profile.employee_name}: open both eyes to finish.`;
+    if (liveness.reopenedFrames >= 2) await submitAttendance(match.profile, confidence);
 }
 
 async function submitAttendance(profile, confidence) {
