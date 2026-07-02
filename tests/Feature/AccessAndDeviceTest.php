@@ -43,6 +43,15 @@ class AccessAndDeviceTest extends TestCase
         $this->actingAs($assistant)->getJson('/api/devices')->assertForbidden();
     }
 
+    public function test_admin_can_remove_a_mistaken_device(): void
+    {
+        $admin = User::where('role', 'admin')->first();
+        $device = Device::create(['name' => 'Mistaken device', 'type' => 'facial_mobile', 'token_hash' => hash('sha256', Str::random(64)), 'is_active' => true]);
+
+        $this->actingAs($admin)->deleteJson("/api/devices/{$device->id}")->assertNoContent();
+        $this->assertDatabaseMissing('devices', ['id' => $device->id]);
+    }
+
     public function test_logout_returns_the_rotated_csrf_token(): void
     {
         $admin = User::where('role', 'admin')->first();
@@ -93,5 +102,22 @@ class AccessAndDeviceTest extends TestCase
         $this->assertSame(0.0, $calculation['sss']);
         $this->assertGreaterThan(0, $calculation['pagibig']);
         $this->assertSame(0.0, $calculation['philhealth']);
+    }
+
+    public function test_only_admin_can_change_employee_incentive(): void
+    {
+        $assistant = User::where('role', 'assistant')->first();
+        $employee = Employee::first();
+        $payload = [
+            'employee_number' => $employee->employee_number, 'name' => $employee->name,
+            'job_title' => $employee->job_title, 'weekly_salary' => $employee->weekly_salary,
+            'incentive' => 1500, 'overtime_hourly_rate' => $employee->overtime_hourly_rate,
+            'overtime_hours' => $employee->overtime_hours, 'deduction_plan' => $employee->deduction_plan,
+            'face_subject_id' => $employee->face_subject_id,
+        ];
+        $this->actingAs($assistant)->putJson("/api/employees/{$employee->id}", $payload)->assertForbidden();
+
+        $admin = User::where('role', 'admin')->first();
+        $this->actingAs($admin)->putJson("/api/employees/{$employee->id}", $payload)->assertOk()->assertJsonPath('incentive', '1500.00');
     }
 }

@@ -1,0 +1,14 @@
+{
+  "id": "/face-terminal",
+  "name": "Nenial Facial Attendance",
+  "short_name": "Nenial Face",
+  "start_url": "/face-terminal",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#092719",
+  "theme_color": "#176b43",
+  "icons": [
+    { "src": "/media/Nenial.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable" }
+  ]
+}

@@ -42,6 +42,7 @@ Route::prefix('api')->group(function () {
             Route::post('/users/{user}/password-reset', [OperationsController::class, 'userPasswordReset']);
             Route::get('/devices', [OperationsController::class, 'devices']);
             Route::post('/devices', [OperationsController::class, 'deviceStore']);
+            Route::delete('/devices/{device}', [OperationsController::class, 'deviceDestroy']);
         });
         Route::post('/pos/checkout', [OperationsController::class, 'pos']);
         Route::get('/sales', [OperationsController::class, 'sales'])->middleware('role:admin,assistant,cashier');

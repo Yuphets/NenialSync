@@ -114,7 +114,11 @@ class OperationsController extends Controller
     public function employeeUpdate(Request $r, Employee $employee, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
-        $employee->update($this->employeeData($r, $employee));
+        $data = $this->employeeData($r, $employee);
+        if ($r->user()->role !== 'admin' && (float) $data['incentive'] !== (float) $employee->incentive) {
+            abort(403, 'Only an administrator may change employee incentives.');
+        }
+        $employee->update($data);
         $outbox->queueEmployee($employee->fresh());
 
         return $employee->fresh();
@@ -292,17 +296,26 @@ class OperationsController extends Controller
     public function deviceStore(Request $r)
     {
         abort_unless($r->user()->role === 'admin', 403);
-        $d = $r->validate(['name' => 'required|string', 'type' => 'required|in:facial,barcode,pos', 'location' => 'nullable|string', 'provider' => 'nullable|string', 'external_id' => 'nullable|string|unique:devices', 'configuration' => 'nullable|array']);
+        $d = $r->validate(['name' => 'required|string', 'type' => 'required|in:facial,facial_mobile,barcode,pos', 'location' => 'nullable|string', 'provider' => 'nullable|string', 'external_id' => 'nullable|string|unique:devices', 'configuration' => 'nullable|array']);
         $token = Str::random(64);
         $device = Device::create([...$d, 'token_hash' => hash('sha256', $token), 'is_active' => true]);
 
         return response()->json(['device' => $device, 'token' => $token], 201);
     }
 
+    public function deviceDestroy(Request $r, Device $device)
+    {
+        abort_unless($r->user()->role === 'admin', 403);
+        $device->update(['is_active' => false]);
+        $device->delete();
+
+        return response()->noContent();
+    }
+
     public function deviceAttendance(Request $r, OfflineOutboxService $outbox)
     {
         $device = $r->attributes->get('device');
-        abort_unless($device->type === 'facial', 422);
+        abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422);
         $d = $r->validate(['subject_id' => 'required|string', 'event_id' => 'required|string', 'recognized_at' => 'required|date', 'confidence' => 'required|numeric|min:0|max:100', 'status' => 'nullable|in:present,half_day']);
         $employee = Employee::where('face_subject_id', $d['subject_id'])->where('is_active', true)->firstOrFail();
         $at = Carbon::parse($d['recognized_at']);
@@ -319,7 +332,7 @@ class OperationsController extends Controller
     public function deviceEmployees(Request $r)
     {
         $device = $r->attributes->get('device');
-        abort_unless($device->type === 'facial', 422, 'A facial-recognition device token is required.');
+        abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422, 'A facial-recognition device token is required.');
 
         return Employee::where('is_active', true)->whereNotNull('face_subject_id')
             ->orderBy('name')->get(['employee_number', 'name', 'job_title', 'face_subject_id']);

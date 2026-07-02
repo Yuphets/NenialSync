@@ -17,11 +17,11 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Nenial Administrator', 'email' => 'admin@nenial.com', 'role' => 'admin', 'password' => env('SEED_ADMIN_PASSWORD', 'ChangeMeAdmin2026!')],
             ['name' => 'Nenial Assistant Administrator', 'email' => 'assistant@nenial.com', 'role' => 'assistant', 'password' => env('SEED_ASSISTANT_PASSWORD', 'ChangeMeAssistant2026!')],
             ['name' => 'Nenial Cashier', 'email' => 'cashier@nenial.com', 'role' => 'cashier', 'password' => env('SEED_CASHIER_PASSWORD', 'ChangeMeCashier2026!')],
-            ['name' => 'Demo Customer', 'email' => 'demo.user@nenial.test', 'role' => 'user', 'password' => env('SEED_DEMO_PASSWORD', 'UserDemo2026!')],
         ];
         foreach ($users as $u) {
             User::updateOrCreate(['email' => $u['email']], ['name' => $u['name'], 'role' => $u['role'], 'is_active' => true, 'password' => Hash::make($u['password'])]);
         }
+        User::where('email', 'demo.user@nenial.test')->update(['is_active' => false]);
         $products = [
             ['name' => 'Portland Cement 40kg', 'sku' => 'CON-001', 'barcode' => '480901000001', 'category' => 'Materials', 'supplier' => 'BuildMix PH', 'unit' => 'bags', 'price' => 285, 'stock_quantity' => 180, 'reorder_level' => 25, 'image_url' => '/media/Background.jpg'],
             ['name' => 'Deformed Steel Bar 10mm', 'sku' => 'CON-002', 'barcode' => '480901000002', 'category' => 'Materials', 'supplier' => 'MetroSteel', 'unit' => 'pcs', 'price' => 165, 'stock_quantity' => 240, 'reorder_level' => 30],

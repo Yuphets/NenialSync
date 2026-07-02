@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import axios from 'axios';
 import * as faceapi from '@vladmandic/face-api';
+import { onBeforeRouteLeave } from 'vue-router';
 
 const video = ref(null);
 const canvas = ref(null);
@@ -19,6 +20,9 @@ let timer = null;
 let modelsReady = false;
 let liveness = null;
 const lastSubmitted = new Map();
+const manifestLink = document.querySelector('link[rel="manifest"]');
+const originalManifest = manifestLink?.getAttribute('href');
+if (manifestLink) manifestLink.setAttribute('href', '/face-manifest.webmanifest');
 
 const selectedEmployee = computed(() => employees.value.find(employee => employee.face_subject_id === selectedSubject.value));
 const options = () => new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.6 });
@@ -190,7 +194,11 @@ async function forget(profile) {
     if (confirm(`Remove the local facial template for ${profile.employee_name}?`)) { await removeTemplate(profile.subject_id); enrolled.value = await templates(); }
 }
 
-onBeforeUnmount(stopCamera);
+onBeforeUnmount(() => {
+    stopCamera();
+    if (manifestLink && originalManifest) manifestLink.setAttribute('href', originalManifest);
+});
+onBeforeRouteLeave(to => to.path === '/' ? '/app/dashboard' : true);
 </script>
 
 <template><main class="face-terminal"><header><div><span class="eyebrow">Nenial Attendance</span><h1>Facial Recognition Terminal</h1></div><RouterLink class="btn" to="/">Exit terminal</RouterLink></header><p class="terminal-status" :class="{ connected }">{{ status }}</p><section v-if="!connected" class="terminal-connect"><label>Facial device token<input v-model="token" type="password" autocomplete="off" placeholder="Paste the one-time device token"></label><button class="btn primary" :disabled="busy || !token" @click="connect">{{ busy ? 'Loading…' : 'Connect terminal' }}</button><small>Use this page on <b>localhost</b> or behind HTTPS. The token and facial descriptors remain on this terminal.</small></section><template v-else><div class="terminal-grid"><section class="camera-stage"><video ref="video" muted playsinline></video><canvas ref="canvas"></canvas><div v-if="!running" class="camera-placeholder">Camera is off</div><button v-if="!running" class="btn primary" @click="startCamera">Start camera</button><button v-else class="btn" @click="stopCamera">Stop camera</button></section><aside><section class="terminal-card"><h2>Enroll employee</h2><label>Employee<select v-model="selectedSubject"><option value="">Choose employee</option><option v-for="employee in employees" :key="employee.face_subject_id" :value="employee.face_subject_id">{{ employee.name }} · {{ employee.employee_number }}</option></select></label><button class="btn primary full" :disabled="busy || !selectedSubject" @click="enroll">Capture three samples</button><small>Obtain employee consent. Enrollment stores numerical descriptors only in this browser.</small></section><section v-if="lastResult" class="terminal-card success"><h2>Attendance recorded</h2><strong>{{ lastResult.name }}</strong><span>{{ lastResult.time }}</span><small>Match confidence {{ lastResult.confidence }}%</small></section><section class="terminal-card"><h2>Local enrollments</h2><div v-if="!enrolled.length" class="empty">No employees enrolled on this terminal.</div><div v-for="profile in enrolled" :key="profile.subject_id" class="enrollment"><span><strong>{{ profile.employee_name }}</strong><small>{{ profile.descriptors.length }} samples</small></span><button class="btn tiny danger" @click="forget(profile)">Remove</button></div></section></aside></div></template></main></template>
