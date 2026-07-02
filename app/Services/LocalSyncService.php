@@ -56,7 +56,7 @@ class LocalSyncService
         }
 
         if (SyncOutbox::whereIn('status', ['pending', 'failed', 'conflict'])->exists()) {
-            return $this->status(true, $synced, $conflicts, 'Cloud inventory pull paused until pending events and conflicts are resolved.');
+            return $this->status(true, $synced, $conflicts, 'Cloud refresh paused until pending events and conflicts are resolved.');
         }
 
         $products = $this->client()->get($this->url('/api/sync/products'));

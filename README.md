@@ -200,7 +200,7 @@ For an installable PWA on devices other than the server itself, put a trusted HT
 - Cloud inventory is pulled only after every pending local event is accepted.
 - If online orders consumed stock while the store was offline, the event is retained as an open conflict. Cloud inventory is not copied over the unresolved local state.
 - Admin and Assistant Admin can see pending events, conflicts, and the last successful sync under **Settings** and trigger a manual sync.
-- Users, password hashes, roles, employee payroll settings, face subject IDs, hashed facial-device credentials, and complete order records synchronize over the authenticated TLS sync channel. A mobile device token generated on the local server therefore becomes valid on the HTTPS cloud terminal after synchronization; the raw one-time token is never synchronized. Local changes use the durable outbox before the cloud snapshot is pulled.
+- Users, password hashes, roles, employee payroll settings, face subject IDs, hashed facial-device credentials, attendance records, and complete order records synchronize over the authenticated TLS sync channel. A mobile device token generated on the local server therefore becomes valid on the HTTPS cloud terminal after synchronization; the raw one-time token is never synchronized. Local changes use the durable outbox before the cloud snapshot is pulled.
 
 Resolve a conflict by reviewing the physical count and cloud order commitments, making the authorized inventory correction in the cloud workspace, then retrying synchronization. Never delete the local outbox or Docker volume to bypass a conflict.
 

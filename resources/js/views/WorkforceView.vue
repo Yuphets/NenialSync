@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import axios from 'axios';
 import PageHeader from '../components/PageHeader.vue';
 import { useAuthStore } from '../stores/auth';
@@ -17,6 +17,7 @@ const deductionDrafts = reactive({});
 const incentiveDrafts = reactive({});
 const deductions = [{ code: 'sss', label: 'SSS' }, { code: 'pagibig', label: 'Pag-IBIG' }, { code: 'philhealth', label: 'PhilHealth' }];
 const form = reactive({ employee_number: '', name: '', job_title: '', weekly_salary: 0, incentive: 0, overtime_hourly_rate: 0, overtime_hours: 0, deduction_plan: deductions.map(item => item.code), face_subject_id: '' });
+let attendanceTimer;
 
 async function loadPayroll() {
     const [employeeResponse, previewResponse] = await Promise.all([
@@ -32,7 +33,11 @@ async function loadPayroll() {
 }
 
 async function load() {
-    await Promise.all([loadPayroll(), axios.get('/api/attendance').then(response => { attendance.value = response.data.data; })]);
+    await Promise.all([loadPayroll(), loadAttendance()]);
+}
+
+async function loadAttendance() {
+    try { attendance.value = (await axios.get('/api/attendance', { params: { _: Date.now() } })).data.data; } catch { /* Preserve the last good list during a brief outage. */ }
 }
 
 async function save() {
@@ -134,7 +139,11 @@ async function mark(employee) {
     await load();
 }
 
-onMounted(load);
+onMounted(() => {
+    load();
+    attendanceTimer = window.setInterval(() => { if (tab.value === 'attendance') loadAttendance(); }, 3000);
+});
+onBeforeUnmount(() => window.clearInterval(attendanceTimer));
 </script>
 
 <template>
