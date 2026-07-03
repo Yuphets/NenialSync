@@ -25,6 +25,13 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         $this->seed(DatabaseSeeder::class);
     }
 
+    public function test_unauthenticated_api_requests_return_json_401_instead_of_login_redirect_error(): void
+    {
+        $this->getJson('/api/local-sync/status')
+            ->assertUnauthorized()
+            ->assertJsonPath('message', 'Unauthenticated.');
+    }
+
     public function test_employee_can_only_time_in_once_per_philippine_day(): void
     {
         $token = Str::random(64);
