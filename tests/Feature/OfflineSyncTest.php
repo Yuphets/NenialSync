@@ -99,6 +99,7 @@ class OfflineSyncTest extends TestCase
             'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
             'https://cloud.example/api/sync/orders' => Http::response([]),
             'https://cloud.example/api/sync/attendance' => Http::response([]),
+            'https://cloud.example/api/sync/payroll-runs' => Http::response([]),
         ]);
 
         $result = app(LocalSyncService::class)->run();
@@ -108,7 +109,7 @@ class OfflineSyncTest extends TestCase
         $this->assertDatabaseHas('sync_outbox', ['event_id' => $eventId, 'status' => 'synced']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud']);
         $this->assertDatabaseHas('sync_states', ['key' => 'cloud_inventory_activity']);
-        Http::assertSentCount(6);
+        Http::assertSentCount(7);
     }
 
     public function test_local_worker_imports_cloud_orders_for_fulfillment(): void
@@ -141,6 +142,7 @@ class OfflineSyncTest extends TestCase
                 ]],
             ]]),
             'https://cloud.example/api/sync/attendance' => Http::response([]),
+            'https://cloud.example/api/sync/payroll-runs' => Http::response([]),
         ]);
 
         $result = app(LocalSyncService::class)->run();
@@ -173,6 +175,7 @@ class OfflineSyncTest extends TestCase
                 'provider_event_id' => 'cloud-face-001', 'metadata' => ['source' => 'mobile'],
                 'created_at' => $recognizedAt->toIso8601String(), 'updated_at' => $recognizedAt->toIso8601String(),
             ]]),
+            'https://cloud.example/api/sync/payroll-runs' => Http::response([]),
         ]);
 
         $result = app(LocalSyncService::class)->run();
@@ -198,6 +201,43 @@ class OfflineSyncTest extends TestCase
 
         $this->assertDatabaseHas('sync_outbox', ['event_type' => 'order.placed', 'status' => 'pending']);
         $this->assertDatabaseHas('sync_outbox', ['event_type' => 'order.status_updated', 'status' => 'pending']);
+    }
+
+    public function test_local_finalized_payroll_is_queued_for_cloud(): void
+    {
+        config(['offline.enabled' => true]);
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $this->actingAs($admin)->postJson('/api/payroll/runs', [
+            'period_start' => '2026-07-01', 'period_end' => '2026-07-07',
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('sync_outbox', ['event_type' => 'payroll.finalized', 'status' => 'pending']);
+    }
+
+    public function test_local_worker_imports_cloud_payroll_snapshots(): void
+    {
+        config(['offline.enabled' => true, 'offline.node_id' => 'store-main', 'offline.cloud_url' => 'https://cloud.example', 'offline.sync_token' => 'sync-secret']);
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $employee = \App\Models\Employee::firstOrFail();
+        $item = ['employee_number' => $employee->employee_number, 'base_pay' => 5000, 'incentive' => 250, 'overtime_pay' => 100, 'gross_pay' => 5350, 'sss' => 250, 'pagibig' => 100, 'philhealth' => 125, 'net_pay' => 4875, 'calculation' => ['gross_pay' => 5350]];
+        Http::fake([
+            'https://cloud.example/api/sync/products' => Http::response(Product::all()->toArray()),
+            'https://cloud.example/api/sync/inventory-activity' => Http::response([]),
+            'https://cloud.example/api/sync/configuration' => Http::response(['users' => [], 'employees' => [], 'devices' => []]),
+            'https://cloud.example/api/sync/orders' => Http::response([]),
+            'https://cloud.example/api/sync/attendance' => Http::response([]),
+            'https://cloud.example/api/sync/payroll-runs' => Http::response([[
+                'reference' => 'PAY-CLOUD-001', 'period_start' => '2026-07-01', 'period_end' => '2026-07-07',
+                'status' => 'finalized', 'created_by_email' => $admin->email, 'finalized_at' => now()->toIso8601String(),
+                'created_at' => now()->toIso8601String(), 'updated_at' => now()->toIso8601String(), 'items' => [$item],
+            ]]),
+        ]);
+
+        $result = app(LocalSyncService::class)->run();
+
+        $this->assertTrue($result['payroll_synced']);
+        $this->assertDatabaseHas('payroll_runs', ['reference' => 'PAY-CLOUD-001', 'status' => 'finalized']);
+        $this->assertDatabaseHas('payroll_items', ['employee_id' => $employee->id, 'net_pay' => 4875]);
     }
 
     private function salePayload(Product $product, int $quantity): array

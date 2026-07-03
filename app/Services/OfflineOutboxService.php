@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\Device;
 use App\Models\User;
 use App\Models\SyncOutbox;
+use App\Models\PayrollRun;
 use Illuminate\Support\Str;
 
 class OfflineOutboxService
@@ -64,7 +65,7 @@ class OfflineOutboxService
         ]);
     }
 
-    public function queueUser(User $user): void
+    public function queueUser(User $user, ?string $lookupEmail = null): void
     {
         $this->queue('user.account_updated', User::class, $user->id, [
             'name' => $user->name,
@@ -77,6 +78,9 @@ class OfflineOutboxService
             'email_verified_at' => $user->email_verified_at?->toIso8601String(),
             'google_id' => $user->google_id,
             'avatar_url' => $user->avatar_url,
+            'deleted_at' => $user->deleted_at?->toIso8601String(),
+            'erased_identity_hash' => $user->erased_identity_hash,
+            'lookup_email' => $lookupEmail ?: $user->email,
         ]);
     }
 
@@ -164,6 +168,23 @@ class OfflineOutboxService
                 'aggregate_type' => AttendanceRecord::class, 'aggregate_id' => $record->id, 'payload' => $payload,
             ]);
         }
+    }
+
+    public function queuePayrollRun(PayrollRun $run): void
+    {
+        $run->loadMissing('creator', 'items.employee');
+        $this->queue('payroll.finalized', PayrollRun::class, $run->id, [
+            'reference' => $run->reference,
+            'period_start' => $run->period_start->format('Y-m-d'),
+            'period_end' => $run->period_end->format('Y-m-d'),
+            'status' => $run->status,
+            'created_by_email' => $run->creator->email,
+            'finalized_at' => $run->finalized_at?->toIso8601String(),
+            'items' => $run->items->map(fn ($item) => [
+                'employee_number' => $item->employee->employee_number,
+                ...$item->only(['base_pay', 'incentive', 'overtime_pay', 'gross_pay', 'sss', 'pagibig', 'philhealth', 'net_pay', 'calculation']),
+            ])->values()->all(),
+        ]);
     }
 
     private function queue(string $eventType, string $aggregateType, int $aggregateId, array $payload): void

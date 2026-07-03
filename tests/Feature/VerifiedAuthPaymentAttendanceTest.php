@@ -165,4 +165,54 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         ])->assertOk()->assertJsonPath('is_active', true);
         $this->assertDatabaseHas('audit_logs', ['action' => 'user.access_restored', 'auditable_id' => $customer->id]);
     }
+
+    public function test_otp_resend_has_one_consistent_cooldown_and_resets_attempts(): void
+    {
+        Mail::fake();
+        $email = 'otp.cooldown@example.com';
+        $this->postJson('/api/auth/register', [
+            'name' => 'OTP Customer', 'email' => $email,
+            'password' => 'CustomerPass2026!', 'password_confirmation' => 'CustomerPass2026!',
+        ])->assertCreated()->assertJsonPath('resend_after', 30);
+
+        $this->postJson('/api/auth/resend-otp', ['email' => $email])
+            ->assertStatus(429)->assertJsonStructure(['message', 'retry_after']);
+        $otp = EmailVerificationOtp::where('user_id', User::where('email', $email)->value('id'))->firstOrFail();
+        $otp->update(['attempts' => 4, 'sent_at' => now()->subSeconds(31)]);
+        $this->postJson('/api/auth/resend-otp', ['email' => $email])
+            ->assertOk()->assertJsonPath('resend_after', 30);
+        $this->assertSame(0, $otp->fresh()->attempts);
+    }
+
+    public function test_admin_can_permanently_erase_a_disabled_account(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $admin->update(['password' => 'AdminErase2026!']);
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => false, 'google_id' => 'google-private-id', 'avatar_url' => 'https://example.test/private.jpg']);
+        $originalEmail = $customer->email;
+
+        $this->actingAs($admin)->deleteJson("/api/users/{$customer->id}/erase", [
+            'current_password' => 'AdminErase2026!', 'email_confirmation' => $originalEmail,
+            'confirmation_phrase' => 'PERMANENTLY ERASE', 'reason' => 'Verified customer erasure request received by support.',
+        ])->assertNoContent();
+
+        $erased = User::withTrashed()->findOrFail($customer->id);
+        $this->assertTrue($erased->trashed());
+        $this->assertNotSame($originalEmail, $erased->email);
+        $this->assertNull($erased->google_id);
+        $this->assertSame(hash('sha256', strtolower($originalEmail)), $erased->erased_identity_hash);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'user.account_permanently_erased', 'auditable_id' => $customer->id]);
+    }
+
+    public function test_admin_can_download_a_sanitized_company_backup(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $admin->update(['password' => 'AdminBackup2026!']);
+        $response = $this->actingAs($admin)->postJson('/api/admin/backup', ['current_password' => 'AdminBackup2026!'])->assertOk();
+        $content = $response->streamedContent();
+        $this->assertStringContainsString('nenial-company-backup', $content);
+        $this->assertStringContainsString('inventory_movements', $content);
+        $this->assertStringNotContainsString($admin->getRawOriginal('password'), $content);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'company.backup_downloaded', 'actor_id' => $admin->id]);
+    }
 }

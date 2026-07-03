@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\InventoryService;
 use App\Services\OfflineOutboxService;
 use App\Services\PayrollCalculator;
+use App\Services\CompanyBackupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -188,18 +189,20 @@ class OperationsController extends Controller
         return Employee::where('is_active', true)->get()->map(fn ($e) => ['employee' => $e, 'calculation' => $calc->calculate($e)]);
     }
 
-    public function payrollRun(Request $r, PayrollCalculator $calc)
+    public function payrollRun(Request $r, PayrollCalculator $calc, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $d = $r->validate(['period_start' => 'required|date', 'period_end' => 'required|date|after_or_equal:period_start']);
         abort_if(PayrollRun::whereDate('period_start', $d['period_start'])->whereDate('period_end', $d['period_end'])->exists(), 422, 'This payroll period was already finalized. View it in Reports.');
 
-        return DB::transaction(function () use ($r, $d, $calc) {
+        return DB::transaction(function () use ($r, $d, $calc, $outbox) {
             $run = PayrollRun::create(['reference' => 'PAY-'.now()->format('YmdHis'), 'period_start' => $d['period_start'], 'period_end' => $d['period_end'], 'status' => 'finalized', 'created_by' => $r->user()->id, 'finalized_at' => now()]);
             foreach (Employee::where('is_active', true)->get() as $e) {
                 $values = $calc->calculate($e);
                 $run->items()->create([...$values, 'employee_id' => $e->id, 'calculation' => $values]);
             }
+
+            $outbox->queuePayrollRun($run->fresh(['creator', 'items.employee']));
 
             return $run->load('items.employee');
         });
@@ -296,6 +299,51 @@ class OperationsController extends Controller
         return $user->fresh();
     }
 
+    public function userErase(Request $r, User $user, OfflineOutboxService $outbox)
+    {
+        abort_unless($r->user()->role === 'admin' && $user->id !== $r->user()->id, 403);
+        $data = $r->validate([
+            'current_password' => 'required|current_password',
+            'email_confirmation' => 'required|string',
+            'confirmation_phrase' => 'required|in:PERMANENTLY ERASE',
+            'reason' => 'required|string|min:10|max:500',
+        ]);
+        abort_if($user->is_active, 422, 'Disable this account before permanently erasing it.');
+        abort_unless(hash_equals(Str::lower($user->email), Str::lower(trim($data['email_confirmation']))), 422, 'The confirmation email does not match.');
+        abort_if($user->role === 'admin' && User::where('role', 'admin')->where('is_active', true)->count() < 1, 422, 'At least one active administrator must remain.');
+
+        $originalEmail = $user->email;
+        $anonymizedEmail = 'deleted-'.Str::uuid().'@anonymized.invalid';
+        DB::transaction(function () use ($r, $user, $data, $anonymizedEmail, $originalEmail) {
+            DB::table('sessions')->where('user_id', $user->id)->delete();
+            Employee::where('user_id', $user->id)->update(['user_id' => null]);
+            PasswordResetTicket::where('user_id', $user->id)->update([
+                'email' => $anonymizedEmail, 'temporary_password' => null,
+                'reason' => 'Account data permanently erased.',
+            ]);
+            $user->forceFill([
+                'name' => 'Deleted account #'.$user->id,
+                'email' => $anonymizedEmail,
+                'password' => Str::random(64),
+                'google_id' => null, 'avatar_url' => null, 'email_verified_at' => null,
+                'remember_token' => null, 'is_active' => false, 'must_change_password' => false,
+                'erased_identity_hash' => hash('sha256', Str::lower($originalEmail)),
+            ])->save();
+            $user->delete();
+            DB::table('audit_logs')->insert([
+                'actor_id' => $r->user()->id, 'action' => 'user.account_permanently_erased',
+                'auditable_type' => User::class, 'auditable_id' => $user->id,
+                'before' => json_encode(['role' => $user->role, 'is_active' => false]),
+                'after' => json_encode(['deleted_at' => $user->deleted_at?->toIso8601String(), 'personal_data_erased' => true]),
+                'metadata' => json_encode(['reason' => $data['reason']]),
+                'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+        $outbox->queueUser($user, $originalEmail);
+
+        return response()->noContent();
+    }
+
     public function passwordTickets(Request $r)
     {
         abort_unless($r->user()->role === 'admin', 403);
@@ -368,6 +416,22 @@ class OperationsController extends Controller
             'employees' => ['active' => Employee::where('is_active', true)->count()],
             'payroll' => ['net_total' => (float) $payrollRuns->sum('net_pay'), 'gross_total' => (float) $payrollRuns->sum('gross_pay'), 'runs' => $payrollRuns],
         ];
+    }
+
+    public function backup(Request $r, CompanyBackupService $backup)
+    {
+        abort_unless($r->user()->role === 'admin', 403);
+        $r->validate(['current_password' => 'required|current_password']);
+        $payload = $backup->export();
+        DB::table('audit_logs')->insert([
+            'actor_id' => $r->user()->id, 'action' => 'company.backup_downloaded',
+            'metadata' => json_encode(['format' => 'json', 'version' => 1]),
+            'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return response()->streamDownload(function () use ($payload) {
+            echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        }, 'nenial-company-backup-'.now()->format('Y-m-d-His').'.json', ['Content-Type' => 'application/json; charset=UTF-8']);
     }
 
     public function devices(Request $r)

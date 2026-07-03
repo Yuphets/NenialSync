@@ -13,6 +13,7 @@ use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Str;
 use App\Services\OfflineOutboxService;
 use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\InvalidStateException;
 use Throwable;
 
 class AuthController extends Controller
@@ -59,6 +60,7 @@ class AuthController extends Controller
         return response()->json([
             'message' => $developmentCode ? 'Development mail mode: use the verification code shown below.' : 'We sent a six-digit verification code to your email.',
             'email' => $user->email, 'verification_required' => true,
+            'resend_after' => 30,
             ...($developmentCode ? ['development_code' => $developmentCode] : []),
         ], 201);
     }
@@ -88,11 +90,14 @@ class AuthController extends Controller
     public function resendOtp(Request $request)
     {
         $data = $request->validate(['email' => 'required|email']);
-        $user = User::whereRaw('LOWER(email) = ?', [Str::lower($data['email'])])->whereNull('email_verified_at')->firstOrFail();
+        $user = User::whereRaw('LOWER(email) = ?', [Str::lower($data['email'])])->where('role', 'user')->where('is_active', true)->whereNull('email_verified_at')->firstOrFail();
         $current = EmailVerificationOtp::where('user_id', $user->id)->first();
-        abort_if($current && $current->sent_at->gt(now()->subMinute()), 429, 'Please wait one minute before requesting another code.');
+        if ($current && $current->sent_at->gt(now()->subSeconds(30))) {
+            $retryAfter = (int) ceil(max(1, 30 - $current->sent_at->diffInSeconds(now())));
+            return response()->json(['message' => "Please wait {$retryAfter} seconds before requesting another code.", 'retry_after' => $retryAfter], 429);
+        }
         $this->sendOtp($user);
-        return ['message' => 'A new verification code was sent.'];
+        return ['message' => 'A new verification code was sent.', 'resend_after' => 30];
     }
 
     public function me(Request $request)
@@ -159,8 +164,17 @@ class AuthController extends Controller
 
     public function googleCallback(Request $request, OfflineOutboxService $outbox)
     {
+        if ($request->filled('error')) {
+            return redirect('/login?oauth_error='.urlencode($request->input('error_description', 'Google sign-in was cancelled or denied.')));
+        }
         try { $google = Socialite::driver('google')->user(); }
-        catch (Throwable) { return redirect('/login?oauth_error='.urlencode('Google sign-in could not be completed.')); }
+        catch (InvalidStateException $exception) {
+            report($exception);
+            return redirect('/login?oauth_error='.urlencode('The Google sign-in session expired. Please try again without changing browsers.'));
+        } catch (Throwable $exception) {
+            report($exception);
+            return redirect('/login?oauth_error='.urlencode('Google sign-in could not be completed. The administrator should verify the Google client secret.'));
+        }
         abort_unless($google->getEmail(), 422, 'Google did not provide a verified email address.');
         $email = Str::lower($google->getEmail());
         $user = User::where('google_id', $google->getId())->orWhereRaw('LOWER(email) = ?', [$email])->first();
@@ -176,8 +190,13 @@ class AuthController extends Controller
     private function sendOtp(User $user): ?string
     {
         $code = (string) random_int(100000, 999999);
+        try {
+            Mail::raw("Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.", fn ($mail) => $mail->to($user->email)->subject('Your Nenial verification code'));
+        } catch (Throwable $exception) {
+            report($exception);
+            abort(503, 'Verification email could not be delivered. Please check the address and try again shortly.');
+        }
         EmailVerificationOtp::updateOrCreate(['user_id' => $user->id], ['code_hash' => $this->otpHash($code), 'attempts' => 0, 'expires_at' => now()->addMinutes(10), 'sent_at' => now()]);
-        Mail::raw("Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.", fn ($mail) => $mail->to($user->email)->subject('Your Nenial verification code'));
         return config('mail.default') === 'log' && app()->environment('local') ? $code : null;
     }
 

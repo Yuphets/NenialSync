@@ -14,7 +14,7 @@ Route::prefix('api')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
     Route::post('/auth/verify-email', [AuthController::class, 'verifyOtp'])->middleware('throttle:10,1');
-    Route::post('/auth/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:3,10');
+    Route::post('/auth/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:5,1');
     Route::post('/auth/password-tickets', [AuthController::class, 'passwordTicket'])->middleware('throttle:3,10');
     Route::post('/auth/password-ticket-status', [AuthController::class, 'passwordTicketStatus'])->middleware('throttle:12,1');
     Route::post('/device/attendance', [OperationsController::class, 'deviceAttendance'])->middleware(['device', 'throttle:120,1']);
@@ -27,9 +27,11 @@ Route::prefix('api')->group(function () {
         Route::get('/sync/inventory-activity', [CloudSyncController::class, 'inventoryActivity']);
         Route::get('/sync/orders', [CloudSyncController::class, 'orders']);
         Route::get('/sync/attendance', [CloudSyncController::class, 'attendances']);
+        Route::get('/sync/payroll-runs', [CloudSyncController::class, 'payrollRuns']);
         Route::get('/sync/configuration', [CloudSyncController::class, 'configuration']);
         Route::post('/sync/sales', [CloudSyncController::class, 'sale']);
         Route::post('/sync/attendance', [CloudSyncController::class, 'attendance']);
+        Route::post('/sync/payroll-runs', [CloudSyncController::class, 'payrollRun']);
         Route::post('/sync/users', [CloudSyncController::class, 'user']);
         Route::post('/sync/employees', [CloudSyncController::class, 'employee']);
         Route::post('/sync/orders', [CloudSyncController::class, 'order']);
@@ -53,6 +55,8 @@ Route::prefix('api')->group(function () {
             Route::put('/users/{user}/role', [OperationsController::class, 'userRole']);
             Route::delete('/users/{user}', [OperationsController::class, 'userDestroy']);
             Route::put('/users/{user}/restore', [OperationsController::class, 'userRestore']);
+            Route::delete('/users/{user}/erase', [OperationsController::class, 'userErase']);
+            Route::post('/admin/backup', [OperationsController::class, 'backup'])->middleware('throttle:3,10');
             Route::get('/password-tickets', [OperationsController::class, 'passwordTickets']);
             Route::post('/users/{user}/password-reset', [OperationsController::class, 'userPasswordReset']);
             Route::get('/devices', [OperationsController::class, 'devices']);

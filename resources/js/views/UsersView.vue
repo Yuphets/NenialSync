@@ -11,6 +11,7 @@ const search = ref("");
 const message = ref("");
 const selected = ref(null);
 const accessTarget = ref(null);
+const eraseTarget = ref(null);
 const showPasswords = ref(false);
 const resetForm = reactive({
     ticket_id: "",
@@ -19,6 +20,7 @@ const resetForm = reactive({
     password_confirmation: "",
 });
 const accessForm = reactive({ current_password: "", reason: "" });
+const eraseForm = reactive({ current_password: "", reason: "", email_confirmation: "", confirmation_phrase: "" });
 const filtered = computed(() =>
     users.value.filter((user) =>
         `${user.name} ${user.email}`
@@ -61,6 +63,22 @@ async function changeAccess() {
             error.response?.data?.message ||
             Object.values(error.response?.data?.errors || {})[0]?.[0] ||
             "Unable to change account access.";
+    }
+}
+
+function openErase(user) {
+    eraseTarget.value = user;
+    Object.assign(eraseForm, { current_password: "", reason: "", email_confirmation: "", confirmation_phrase: "" });
+}
+
+async function eraseAccount() {
+    try {
+        await axios.delete(`/api/users/${eraseTarget.value.id}/erase`, { data: eraseForm });
+        message.value = "The account and identifying profile data were permanently erased. Historical business records remain anonymized.";
+        eraseTarget.value = null;
+        await load();
+    } catch (error) {
+        message.value = error.response?.data?.message || Object.values(error.response?.data?.errors || {})[0]?.[0] || "Account erasure failed.";
     }
 }
 
@@ -173,7 +191,9 @@ onMounted(load);
                         <td data-label="Role">
                             <select
                                 v-model="user.role"
-                                :disabled="user.id === auth.user.id || !user.is_active"
+                                :disabled="
+                                    user.id === auth.user.id || !user.is_active
+                                "
                                 @change="role(user)"
                             >
                                 <option>admin</option>
@@ -204,7 +224,7 @@ onMounted(load);
                                         : "Remove access"
                                 }}
                             </button>
-                            <button v-else class="btn tiny primary" @click="openAccess(user, true)">Grant access again</button>
+                            <div v-else class="actions"><button class="btn tiny primary" @click="openAccess(user, true)">Grant access again</button><button class="btn tiny danger" @click="openErase(user)">Permanently erase</button></div>
                         </td>
                     </tr>
                 </tbody>
@@ -212,16 +232,68 @@ onMounted(load);
         </div>
     </section>
 
+    <div v-if="eraseTarget" class="modal"><form class="modal-card" @submit.prevent="eraseAccount"><div class="panel-head"><div><h2>Permanently erase account</h2><small>{{ eraseTarget.name }} · {{ eraseTarget.email }}</small></div><button type="button" class="btn ghost" @click="eraseTarget = null">Close</button></div><p class="error">This cannot be undone. Personal profile and login data will be anonymized permanently. Historical orders and audit records remain for company accounting.</p><label>Reason<textarea v-model="eraseForm.reason" rows="3" minlength="10" required></textarea></label><label>Type the account email<input v-model="eraseForm.email_confirmation" type="email" required></label><label>Type PERMANENTLY ERASE<input v-model="eraseForm.confirmation_phrase" required></label><label>Your administrator password<input v-model="eraseForm.current_password" type="password" autocomplete="current-password" required></label><button class="btn danger full">Permanently erase this account</button></form></div>
+
     <div v-if="accessTarget" class="modal">
         <form class="modal-card" @submit.prevent="changeAccess">
             <div class="panel-head">
-                <div><h2>{{ accessTarget.restore ? 'Grant access again' : 'Disable user access' }}</h2><small>{{ accessTarget.user.name }} · {{ accessTarget.user.email }}</small></div>
-                <button type="button" class="btn ghost" @click="accessTarget = null">Close</button>
+                <div>
+                    <h2>
+                        {{
+                            accessTarget.restore
+                                ? "Grant access again"
+                                : "Disable user access"
+                        }}
+                    </h2>
+                    <small
+                        >{{ accessTarget.user.name }} ·
+                        {{ accessTarget.user.email }}</small
+                    >
+                </div>
+                <button
+                    type="button"
+                    class="btn ghost"
+                    @click="accessTarget = null"
+                >
+                    Close
+                </button>
             </div>
-            <p>{{ accessTarget.restore ? 'The user will be able to sign in again immediately.' : 'The user will be signed out on every device and prevented from signing in until access is restored.' }}</p>
-            <label>Reason<textarea v-model="accessForm.reason" rows="3" :placeholder="accessTarget.restore ? 'Why is access being restored?' : 'Why is access being disabled?'" required></textarea></label>
-            <label>Your administrator password<input v-model="accessForm.current_password" type="password" autocomplete="current-password" required></label>
-            <button class="btn full" :class="accessTarget.restore ? 'primary' : 'danger'">{{ accessTarget.restore ? 'Confirm and grant access' : 'Confirm and disable access' }}</button>
+            <p>
+                {{
+                    accessTarget.restore
+                        ? "The user will be able to sign in again immediately."
+                        : "The user will be signed out on every device and prevented from signing in until access is restored."
+                }}
+            </p>
+            <label
+                >Reason<textarea
+                    v-model="accessForm.reason"
+                    rows="3"
+                    :placeholder="
+                        accessTarget.restore
+                            ? 'Why is access being restored?'
+                            : 'Why is access being disabled?'
+                    "
+                    required
+                ></textarea>
+            </label>
+            <label
+                >Your administrator password<input
+                    v-model="accessForm.current_password"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+            /></label>
+            <button
+                class="btn full"
+                :class="accessTarget.restore ? 'primary' : 'danger'"
+            >
+                {{
+                    accessTarget.restore
+                        ? "Confirm and grant access"
+                        : "Confirm and disable access"
+                }}
+            </button>
         </form>
     </div>
 

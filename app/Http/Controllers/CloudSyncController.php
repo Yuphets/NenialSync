@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SyncReceipt;
 use App\Models\User;
+use App\Models\PayrollRun;
 use App\Services\InventoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -74,16 +75,33 @@ class CloudSyncController extends Controller
             ]);
     }
 
+    public function payrollRuns()
+    {
+        return PayrollRun::with(['creator:id,email', 'items.employee:id,employee_number'])
+            ->orderBy('period_start')->get()->map(fn (PayrollRun $run) => [
+                ...$run->only(['reference', 'status', 'finalized_at', 'created_at', 'updated_at']),
+                'period_start' => $run->period_start->format('Y-m-d'),
+                'period_end' => $run->period_end->format('Y-m-d'),
+                'created_by_email' => $run->creator->email,
+                'items' => $run->items->map(fn ($item) => [
+                    'employee_number' => $item->employee->employee_number,
+                    ...$item->only(['base_pay', 'incentive', 'overtime_pay', 'gross_pay', 'sss', 'pagibig', 'philhealth', 'net_pay', 'calculation']),
+                ])->values(),
+            ]);
+    }
+
     public function configuration()
     {
         return [
             'capabilities' => ['device_sync' => true],
-            'users' => User::orderBy('email')->get()->map(fn (User $user) => [
+            'users' => User::withTrashed()->orderBy('email')->get()->map(fn (User $user) => [
                 'name' => $user->name, 'email' => $user->email,
                 'password_hash' => $user->getRawOriginal('password'), 'role' => $user->role,
                 'is_active' => $user->is_active, 'password_changed_at' => $user->password_changed_at?->toIso8601String(),
                 'must_change_password' => $user->must_change_password,
                 'email_verified_at' => $user->email_verified_at?->toIso8601String(), 'google_id' => $user->google_id, 'avatar_url' => $user->avatar_url,
+                'deleted_at' => $user->deleted_at?->toIso8601String(),
+                'erased_identity_hash' => $user->erased_identity_hash,
             ]),
             'employees' => Employee::withTrashed()->with('user:id,email')->orderBy('employee_number')->get()->map(fn (Employee $employee) => [
                 ...$employee->only(['employee_number', 'name', 'job_title', 'weekly_salary', 'incentive', 'overtime_hourly_rate', 'overtime_hours', 'deduction_plan', 'face_subject_id', 'is_active']),
@@ -263,6 +281,46 @@ class CloudSyncController extends Controller
         return response()->json($record, 201);
     }
 
+    public function payrollRun(Request $request)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80', 'event_id' => 'required|uuid',
+            'payload.reference' => 'required|string|max:255',
+            'payload.period_start' => 'required|date', 'payload.period_end' => 'required|date|after_or_equal:payload.period_start',
+            'payload.status' => 'required|in:finalized', 'payload.created_by_email' => 'required|email',
+            'payload.finalized_at' => 'required|date', 'payload.items' => 'required|array|min:1',
+            'payload.items.*.employee_number' => 'required|string',
+            'payload.items.*.base_pay' => 'required|numeric|min:0', 'payload.items.*.incentive' => 'required|numeric|min:0',
+            'payload.items.*.overtime_pay' => 'required|numeric|min:0', 'payload.items.*.gross_pay' => 'required|numeric|min:0',
+            'payload.items.*.sss' => 'required|numeric|min:0', 'payload.items.*.pagibig' => 'required|numeric|min:0',
+            'payload.items.*.philhealth' => 'required|numeric|min:0', 'payload.items.*.net_pay' => 'required|numeric|min:0',
+            'payload.items.*.calculation' => 'required|array',
+        ]);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return PayrollRun::with('items.employee')->findOrFail($receipt->result_id);
+        }
+
+        $run = DB::transaction(function () use ($data) {
+            $payload = $data['payload'];
+            $creator = User::where('email', $payload['created_by_email'])->whereIn('role', ['admin', 'assistant'])->firstOrFail();
+            $run = PayrollRun::where('reference', $payload['reference'])
+                ->orWhere(fn ($query) => $query->whereDate('period_start', $payload['period_start'])->whereDate('period_end', $payload['period_end']))->first();
+            $run ??= new PayrollRun;
+            $run->fill(collect($payload)->only(['reference', 'period_start', 'period_end', 'status', 'finalized_at'])->all());
+            $run->created_by = $creator->id;
+            $run->save();
+            $run->items()->delete();
+            foreach ($payload['items'] as $item) {
+                $employee = Employee::withTrashed()->where('employee_number', $item['employee_number'])->firstOrFail();
+                $run->items()->create(['employee_id' => $employee->id, ...collect($item)->except('employee_number')->all()]);
+            }
+            SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'payroll.finalized', 'result_type' => PayrollRun::class, 'result_id' => $run->id, 'received_at' => now()]);
+            return $run;
+        });
+
+        return response()->json($run->load('items.employee'), 201);
+    }
+
     public function user(Request $request)
     {
         $data = $request->validate([
@@ -272,17 +330,23 @@ class CloudSyncController extends Controller
             'payload.is_active' => 'required|boolean', 'payload.password_changed_at' => 'nullable|date',
             'payload.must_change_password' => 'required|boolean',
             'payload.email_verified_at' => 'nullable|date', 'payload.google_id' => 'nullable|string|max:255', 'payload.avatar_url' => 'nullable|string|max:2048',
+            'payload.deleted_at' => 'nullable|date',
+            'payload.erased_identity_hash' => 'nullable|string|size:64', 'payload.lookup_email' => 'nullable|email|max:190',
         ]);
         if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) return User::findOrFail($receipt->result_id);
         $user = DB::transaction(function () use ($data) {
             $payload = $data['payload'];
-            $user = User::firstOrNew(['email' => $payload['email']]);
+            $user = User::withTrashed()->where('email', $payload['lookup_email'] ?? $payload['email'])
+                ->orWhere('erased_identity_hash', $payload['erased_identity_hash'] ?? '__none__')->first()
+                ?: new User;
             $user->forceFill([
                 'name' => $payload['name'], 'password' => $payload['password_hash'], 'role' => $payload['role'],
                 'is_active' => $payload['is_active'], 'password_changed_at' => $payload['password_changed_at'],
                 'must_change_password' => $payload['must_change_password'],
                 'email_verified_at' => $payload['email_verified_at'], 'google_id' => $payload['google_id'], 'avatar_url' => $payload['avatar_url'],
+                'email' => $payload['email'], 'erased_identity_hash' => $payload['erased_identity_hash'] ?? null,
             ])->save();
+            $payload['deleted_at'] ? $user->delete() : $user->restore();
             SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'user.account_updated', 'result_type' => User::class, 'result_id' => $user->id, 'received_at' => now()]);
             return $user;
         });

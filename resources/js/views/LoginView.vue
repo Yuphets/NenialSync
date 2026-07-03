@@ -15,6 +15,7 @@ const temporaryPassword = ref("");
 const ticketNumber = ref(localStorage.getItem("nenial-password-ticket") || "");
 const verificationEmail = ref("");
 const capabilities = ref({ email_delivery: true, google: false });
+const resendRemaining = ref(0);
 const form = reactive({
     name: "",
     email: "",
@@ -24,6 +25,17 @@ const form = reactive({
     code: "",
 });
 let ticketTimer;
+let resendTimer;
+
+function startResendCooldown(seconds = 30) {
+    clearInterval(resendTimer);
+    resendRemaining.value = Math.max(0, Number(seconds) || 0);
+    if (!resendRemaining.value) return;
+    resendTimer = window.setInterval(() => {
+        resendRemaining.value -= 1;
+        if (resendRemaining.value <= 0) clearInterval(resendTimer);
+    }, 1000);
+}
 
 function destination() {
     if (auth.user.must_change_password) return "/app/settings";
@@ -62,6 +74,7 @@ async function submit() {
             form.email = data.email;
             mode.value = "verify";
             result.value = data.message;
+            startResendCooldown(data.resend_after);
             if (data.development_code) {
                 form.code = data.development_code;
                 result.value += ` Code: ${data.development_code}`;
@@ -86,15 +99,20 @@ async function submit() {
 }
 
 async function resendOtp() {
+    if (resendRemaining.value) return;
+    error.value = "";
     try {
-        result.value = (
+        const data = (
             await axios.post("/api/auth/resend-otp", {
                 email: verificationEmail.value || form.email,
             })
-        ).data.message;
+        ).data;
+        result.value = data.message;
+        startResendCooldown(data.resend_after);
     } catch (exception) {
-        error.value =
-            exception.response?.data?.message || "Unable to resend the code.";
+        const payload = exception.response?.data;
+        error.value = payload?.message || "Unable to resend the code.";
+        if (payload?.retry_after) startResendCooldown(payload.retry_after);
     }
 }
 
@@ -132,7 +150,10 @@ onMounted(async () => {
         /* Keep password login available. */
     }
 });
-onBeforeUnmount(() => clearInterval(ticketTimer));
+onBeforeUnmount(() => {
+    clearInterval(ticketTimer);
+    clearInterval(resendTimer);
+});
 </script>
 
 <template>
@@ -247,19 +268,33 @@ onBeforeUnmount(() => clearInterval(ticketTimer));
                     v-if="mode === 'verify'"
                     type="button"
                     class="text-button"
+                    :disabled="resendRemaining > 0"
                     @click="resendOtp"
                 >
-                    Resend code</button
+                    {{
+                        resendRemaining > 0
+                            ? `Resend available in ${resendRemaining}s`
+                            : "Resend code"
+                    }}</button
                 ><template v-if="['login', 'register'].includes(mode)"
                     ><div class="auth-divider"><span>or</span></div>
                     <button
                         type="button"
                         class="btn google"
                         :disabled="!capabilities.google"
-                        :title="capabilities.google ? 'Continue with Google' : 'Google sign-in has not been configured by the administrator'"
+                        :title="
+                            capabilities.google
+                                ? 'Continue with Google'
+                                : 'Google sign-in has not been configured by the administrator'
+                        "
                         @click="googleLogin"
                     >
-                        <b>G</b> {{ capabilities.google ? 'Continue with Google' : 'Google sign-in not configured' }}
+                        <b>G</b>
+                        {{
+                            capabilities.google
+                                ? "Continue with Google"
+                                : "Google sign-in not configured"
+                        }}
                     </button></template
                 ><button
                     v-if="mode === 'login'"
