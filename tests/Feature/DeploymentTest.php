@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Foundation\Vite;
 use Tests\TestCase;
 
 class DeploymentTest extends TestCase
@@ -18,6 +19,7 @@ class DeploymentTest extends TestCase
 
     public function test_forwarded_https_is_used_for_vite_assets(): void
     {
+        app(Vite::class)->useHotFile(storage_path('framework/testing/nonexistent-vite-hot-file'));
         $response = $this->withHeaders([
             'Host' => 'nenialsync.vercel.app',
             'X-Forwarded-Host' => 'nenialsync.vercel.app',

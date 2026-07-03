@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('api')->group(function () {
     Route::get('/storefront/products', [ProductController::class, 'index']);
+    Route::get('/auth/capabilities', [AuthController::class, 'capabilities']);
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
     Route::post('/auth/verify-email', [AuthController::class, 'verifyOtp'])->middleware('throttle:10,1');

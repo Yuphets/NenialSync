@@ -110,4 +110,41 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
             ->assertOk()->assertJsonPath('payment_url', 'https://checkout.paymongo.test/session');
         $this->assertDatabaseHas('orders', ['id' => $order['id'], 'payment_provider' => 'gcash', 'provider_session_id' => 'cs_test_nenial']);
     }
+
+    public function test_new_employee_is_enrollable_and_removed_number_can_be_reactivated(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $payload = [
+            'employee_number' => 'EMP-REUSE-1', 'name' => 'First Employee', 'job_title' => 'Loader',
+            'weekly_salary' => 5000, 'incentive' => 0, 'overtime_hourly_rate' => 100,
+            'overtime_hours' => 0, 'deduction_plan' => ['sss'], 'face_subject_id' => null,
+        ];
+        $employee = $this->actingAs($admin)->postJson('/api/employees', $payload)
+            ->assertCreated()->assertJsonPath('employee_number', 'EMP-REUSE-1')->json();
+        $this->assertNotEmpty($employee['face_subject_id']);
+
+        $this->actingAs($admin)->deleteJson("/api/employees/{$employee['id']}")->assertNoContent();
+        $this->actingAs($admin)->postJson('/api/employees', [...$payload, 'name' => 'Reactivated Employee'])
+            ->assertOk()->assertJsonPath('id', $employee['id'])->assertJsonPath('name', 'Reactivated Employee');
+        $this->assertDatabaseCount('employees', 7);
+    }
+
+    public function test_report_includes_a_payroll_run_that_overlaps_the_selected_period(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $this->actingAs($admin)->postJson('/api/payroll/runs', ['period_start' => '2026-06-27', 'period_end' => '2026-07-03'])->assertCreated();
+        $this->actingAs($admin)->getJson('/api/reports?from=2026-07-01&to=2026-07-31')
+            ->assertOk()->assertJsonCount(1, 'payroll.runs');
+    }
+
+    public function test_pos_additional_discount_is_applied_after_the_product_discount(): void
+    {
+        $cashier = User::where('role', 'cashier')->firstOrFail();
+        $product = Product::firstOrFail();
+        $product->update(['price' => 100, 'discount_percent' => 10]);
+        $this->actingAs($cashier)->postJson('/api/pos/checkout', [
+            'items' => [['product_id' => $product->id, 'quantity' => 1]], 'payment_method' => 'cash',
+            'discount_percent' => 20, 'idempotency_key' => (string) Str::uuid(),
+        ])->assertCreated()->assertJsonPath('discount_total', 28)->assertJsonPath('total', 72);
+    }
 }

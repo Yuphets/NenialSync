@@ -19,10 +19,10 @@ x-app-env: &app-env
   LOCAL_NODE_ID: ${LOCAL_NODE_ID:-store-main}
   CLOUD_URL: ${CLOUD_URL:-https://nenialsync.vercel.app}
   SYNC_SHARED_SECRET: ${SYNC_SHARED_SECRET}
-  MAIL_MAILER: ${MAIL_MAILER:-log}
+  MAIL_MAILER: ${MAIL_MAILER:-smtp}
   MAIL_SCHEME: ${MAIL_SCHEME:-null}
-  MAIL_HOST: ${MAIL_HOST:-127.0.0.1}
-  MAIL_PORT: ${MAIL_PORT:-2525}
+  MAIL_HOST: ${MAIL_HOST:-mailpit}
+  MAIL_PORT: ${MAIL_PORT:-1025}
   MAIL_USERNAME: ${MAIL_USERNAME:-null}
   MAIL_PASSWORD: ${MAIL_PASSWORD:-null}
   MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-hello@example.com}
@@ -55,6 +55,12 @@ services:
       timeout: 5s
       retries: 20
 
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+
   app:
     build:
       context: .
@@ -64,6 +70,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     ports:
       - "8080:80"
     healthcheck:

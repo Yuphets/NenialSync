@@ -1,28 +1,284 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import axios from 'axios';
-import { BrowserMultiFormatReader } from '@zxing/browser';
-import PageHeader from '../components/PageHeader.vue';
-import { useInventoryStore } from '../stores/inventory';
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import axios from "axios";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import PageHeader from "../components/PageHeader.vue";
+import { useInventoryStore } from "../stores/inventory";
 
 const VAT_RATE = 0.12;
 const inventory = useInventoryStore();
-const search = ref(''); const barcode = ref(''); const cart = ref([]); const message = ref(''); const busy = ref(false); const showCamera = ref(false); const video = ref(null);
-const reader = new BrowserMultiFormatReader(); let scannerControls = null; let checkoutKey = crypto.randomUUID();
-const products = computed(() => inventory.products.filter(product => [product.name, product.sku, product.barcode].some(value => value.toLowerCase().includes(search.value.toLowerCase()))));
-const subtotal = computed(() => cart.value.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0));
-const discount = computed(() => cart.value.reduce((sum, item) => sum + Number(item.price) * item.quantity * Number(item.discount_percent) / 100, 0));
-const total = computed(() => subtotal.value - discount.value);
+const search = ref("");
+const barcode = ref("");
+const cart = ref([]);
+const message = ref("");
+const busy = ref(false);
+const showCamera = ref(false);
+const video = ref(null);
+const saleDiscountPercent = ref(0);
+const reader = new BrowserMultiFormatReader();
+let scannerControls = null;
+let checkoutKey = crypto.randomUUID();
+const products = computed(() =>
+    inventory.products.filter((product) =>
+        [product.name, product.sku, product.barcode].some((value) =>
+            value.toLowerCase().includes(search.value.toLowerCase()),
+        ),
+    ),
+);
+const subtotal = computed(() =>
+    cart.value.reduce(
+        (sum, item) => sum + Number(item.price) * item.quantity,
+        0,
+    ),
+);
+const discount = computed(() =>
+    cart.value.reduce(
+        (sum, item) =>
+            sum +
+            (Number(item.price) *
+                item.quantity *
+                Number(item.discount_percent)) /
+                100,
+        0,
+    ),
+);
+const saleDiscount = computed(
+    () =>
+        ((subtotal.value - discount.value) *
+            Math.max(
+                0,
+                Math.min(100, Number(saleDiscountPercent.value) || 0),
+            )) /
+        100,
+);
+const totalDiscount = computed(() => discount.value + saleDiscount.value);
+const total = computed(() => subtotal.value - totalDiscount.value);
 const vatable = computed(() => total.value / (1 + VAT_RATE));
 const vat = computed(() => total.value - vatable.value);
-const money = value => Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (value) =>
+    Number(value).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
 
-onMounted(async () => { await inventory.load(); inventory.start(); });
-onBeforeUnmount(() => { inventory.stop(); scannerControls?.stop(); });
-function add(product) { const item = cart.value.find(value => value.id === product.id); const quantity = (item?.quantity || 0) + 1; if (quantity > product.available_quantity) return message.value = 'Insufficient available stock.'; item ? item.quantity++ : cart.value.push({ ...product, quantity: 1 }); barcode.value = ''; }
-function scan() { const code = barcode.value.trim(); const product = inventory.products.find(item => item.barcode === code || item.sku.toLowerCase() === code.toLowerCase()); product ? add(product) : message.value = 'Barcode or SKU not found.'; }
-function closeCamera() { scannerControls?.stop(); scannerControls = null; showCamera.value = false; }
-async function camera() { showCamera.value = true; await new Promise(resolve => setTimeout(resolve)); try { scannerControls = await reader.decodeFromVideoDevice(undefined, video.value, result => { if (result) { barcode.value = result.getText(); closeCamera(); scan(); } }); } catch { closeCamera(); message.value = 'Camera access failed. Use a USB scanner or grant camera permission.'; } }
-async function checkout() { busy.value = true; try { const { data } = await axios.post('/api/pos/checkout', { items: cart.value.map(item => ({ product_id: item.id, quantity: item.quantity })), payment_method: 'cash', idempotency_key: checkoutKey }); message.value = `Sale ${data.reference} completed · ₱${money(data.total)} (VAT ₱${money(data.vat_amount)})`; cart.value = []; checkoutKey = crypto.randomUUID(); await inventory.load(); } catch (error) { message.value = error.response?.data?.message || Object.values(error.response?.data?.errors || {})[0]?.[0] || 'Sale failed.'; } finally { busy.value = false; } }
+onMounted(async () => {
+    await inventory.load();
+    inventory.start();
+});
+onBeforeUnmount(() => {
+    inventory.stop();
+    scannerControls?.stop();
+});
+function add(product) {
+    const item = cart.value.find((value) => value.id === product.id);
+    const quantity = (item?.quantity || 0) + 1;
+    if (quantity > product.available_quantity)
+        return (message.value = "Insufficient available stock.");
+    item ? item.quantity++ : cart.value.push({ ...product, quantity: 1 });
+    barcode.value = "";
+}
+function scan() {
+    const code = barcode.value.trim();
+    const product = inventory.products.find(
+        (item) =>
+            item.barcode === code ||
+            item.sku.toLowerCase() === code.toLowerCase(),
+    );
+    product ? add(product) : (message.value = "Barcode or SKU not found.");
+}
+function closeCamera() {
+    scannerControls?.stop();
+    scannerControls = null;
+    showCamera.value = false;
+}
+async function camera() {
+    showCamera.value = true;
+    await new Promise((resolve) => setTimeout(resolve));
+    try {
+        scannerControls = await reader.decodeFromVideoDevice(
+            undefined,
+            video.value,
+            (result) => {
+                if (result) {
+                    barcode.value = result.getText();
+                    closeCamera();
+                    scan();
+                }
+            },
+        );
+    } catch {
+        closeCamera();
+        message.value =
+            "Camera access failed. Use a USB scanner or grant camera permission.";
+    }
+}
+async function checkout() {
+    busy.value = true;
+    try {
+        const { data } = await axios.post("/api/pos/checkout", {
+            items: cart.value.map((item) => ({
+                product_id: item.id,
+                quantity: item.quantity,
+            })),
+            payment_method: "cash",
+            discount_percent: Number(saleDiscountPercent.value) || 0,
+            idempotency_key: checkoutKey,
+        });
+        message.value = `Sale ${data.reference} completed · ₱${money(data.total)} (VAT ₱${money(data.vat_amount)})`;
+        cart.value = [];
+        saleDiscountPercent.value = 0;
+        checkoutKey = crypto.randomUUID();
+        await inventory.load();
+    } catch (error) {
+        message.value =
+            error.response?.data?.message ||
+            Object.values(error.response?.data?.errors || {})[0]?.[0] ||
+            "Sale failed.";
+    } finally {
+        busy.value = false;
+    }
+}
 </script>
-<template><PageHeader title="POS Terminal" subtitle="Fast counter checkout with transaction-safe stock deduction"><span class="live">● Inventory live</span></PageHeader><p v-if="message" class="notice">{{ message }}</p><div class="pos-layout"><section class="panel compact-products"><div class="panel-head"><h2>Product keys</h2><span>{{ products.length }} items</span></div><div class="scanner"><input v-model="barcode" autofocus placeholder="Scan barcode or enter SKU" @keyup.enter="scan"><button class="btn primary" @click="scan">Add</button><button class="btn ghost" @click="camera">Use camera</button></div><input v-model="search" class="search" placeholder="Search products"><div class="pos-keys"><button v-for="product in products" :key="product.id" :disabled="!product.available_quantity" @click="add(product)"><strong>{{ product.name }}</strong><small>{{ product.sku }} · {{ product.available_quantity }} {{ product.unit }}</small><b>₱{{ money(product.price) }}</b></button></div></section><section class="panel sale-ticket"><div class="ticket-head"><div><small>REGISTER 01</small><h2>Sale Ticket</h2></div><span>{{ cart.reduce((sum, item) => sum + item.quantity, 0) }} items</span></div><div class="ticket-lines"><div v-if="!cart.length" class="empty">Scan or select products to begin a sale.</div><div v-for="item in cart" :key="item.id" class="ticket-line"><div><strong>{{ item.name }}</strong><small>₱{{ money(item.price) }} × {{ item.quantity }}</small></div><div class="qty"><button @click="item.quantity > 1 ? item.quantity-- : cart.splice(cart.indexOf(item), 1)">−</button><span>{{ item.quantity }}</span><button :disabled="item.quantity >= item.available_quantity" @click="item.quantity++">+</button></div><b>₱{{ money(item.price * item.quantity * (1 - item.discount_percent / 100)) }}</b></div></div><div class="ticket-summary"><span>Subtotal <b>₱{{ money(subtotal) }}</b></span><span>Discount <b>−₱{{ money(discount) }}</b></span><span>VATable sales <b>₱{{ money(vatable) }}</b></span><span>VAT (12%, included) <b>₱{{ money(vat) }}</b></span></div><div class="ticket-total"><span>Total</span><strong>₱{{ money(total) }}</strong></div><button class="btn primary full checkout" :disabled="!cart.length || busy" @click="checkout">{{ busy ? 'Processing…' : 'Complete cash sale' }}</button></section></div><div v-if="showCamera" class="modal"><div class="modal-card"><div class="panel-head"><h2>Camera barcode scanner</h2><button class="btn ghost" @click="closeCamera">Close</button></div><video ref="video"></video><p>Position the barcode inside the camera view.</p></div></div></template>
+<template>
+    <PageHeader
+        title="POS Terminal"
+        subtitle="Fast counter checkout with transaction-safe stock deduction"
+        ><span class="live">● Inventory live</span></PageHeader
+    >
+    <p v-if="message" class="notice">{{ message }}</p>
+    <div class="pos-layout">
+        <section class="panel compact-products">
+            <div class="panel-head">
+                <h2>Product keys</h2>
+                <span>{{ products.length }} items</span>
+            </div>
+            <div class="scanner">
+                <input
+                    v-model="barcode"
+                    autofocus
+                    placeholder="Scan barcode or enter SKU"
+                    @keyup.enter="scan"
+                /><button class="btn primary" @click="scan">Add</button
+                ><button class="btn ghost" @click="camera">Use camera</button>
+            </div>
+            <input
+                v-model="search"
+                class="search"
+                placeholder="Search products"
+            />
+            <div class="pos-keys">
+                <button
+                    v-for="product in products"
+                    :key="product.id"
+                    :disabled="!product.available_quantity"
+                    @click="add(product)"
+                >
+                    <strong>{{ product.name }}</strong
+                    ><small
+                        >{{ product.sku }} · {{ product.available_quantity }}
+                        {{ product.unit }}</small
+                    ><b>₱{{ money(product.price) }}</b>
+                </button>
+            </div>
+        </section>
+        <section class="panel sale-ticket">
+            <div class="ticket-head">
+                <div>
+                    <small>REGISTER 01</small>
+                    <h2>Sale Ticket</h2>
+                </div>
+                <span
+                    >{{
+                        cart.reduce((sum, item) => sum + item.quantity, 0)
+                    }}
+                    items</span
+                >
+            </div>
+            <div class="ticket-lines">
+                <div v-if="!cart.length" class="empty">
+                    Scan or select products to begin a sale.
+                </div>
+                <div v-for="item in cart" :key="item.id" class="ticket-line">
+                    <div>
+                        <strong>{{ item.name }}</strong
+                        ><small
+                            >₱{{ money(item.price) }} ×
+                            {{ item.quantity }}</small
+                        >
+                    </div>
+                    <div class="qty">
+                        <button
+                            @click="
+                                item.quantity > 1
+                                    ? item.quantity--
+                                    : cart.splice(cart.indexOf(item), 1)
+                            "
+                        >
+                            −</button
+                        ><span>{{ item.quantity }}</span
+                        ><button
+                            :disabled="item.quantity >= item.available_quantity"
+                            @click="item.quantity++"
+                        >
+                            +
+                        </button>
+                    </div>
+                    <b
+                        >₱{{
+                            money(
+                                item.price *
+                                    item.quantity *
+                                    (1 - item.discount_percent / 100),
+                            )
+                        }}</b
+                    >
+                </div>
+            </div>
+            <div class="ticket-summary">
+                <span
+                    >Subtotal <b>₱{{ money(subtotal) }}</b></span
+                ><span
+                    >Product discounts <b>−₱{{ money(discount) }}</b></span
+                >
+                <label class="ticket-discount">
+                    <span>Additional sale discount</span>
+                    <span><input v-model.number="saleDiscountPercent" type="number" min="0" max="100" step="1" aria-label="Additional sale discount percent">%</span>
+                </label>
+                <span
+                    >Additional discount <b>−₱{{ money(saleDiscount) }}</b></span
+                ><span
+                    >Total discount <b>−₱{{ money(totalDiscount) }}</b></span
+                ><span
+                    >VATable sales <b>₱{{ money(vatable) }}</b></span
+                ><span
+                    >VAT (12%, included) <b>₱{{ money(vat) }}</b></span
+                >
+            </div>
+            <div class="ticket-total">
+                <span>Total</span><strong>₱{{ money(total) }}</strong>
+            </div>
+            <button
+                class="btn primary full checkout"
+                :disabled="!cart.length || busy"
+                @click="checkout"
+            >
+                {{ busy ? "Processing…" : "Complete cash sale" }}
+            </button>
+        </section>
+    </div>
+    <div v-if="showCamera" class="modal">
+        <div class="modal-card">
+            <div class="panel-head">
+                <h2>Camera barcode scanner</h2>
+                <button class="btn ghost" @click="closeCamera">Close</button>
+            </div>
+            <video ref="video"></video>
+            <p>Position the barcode inside the camera view.</p>
+        </div>
+    </div>
+</template>
+<style scoped>
+.ticket-discount { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.ticket-discount > span:last-child { display: flex; align-items: center; gap: .35rem; color: var(--ink); font-weight: 700; }
+.ticket-discount input { width: 82px; min-height: 34px; padding: .35rem .5rem; text-align: right; }
+</style>

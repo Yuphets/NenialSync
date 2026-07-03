@@ -17,6 +17,14 @@ use Throwable;
 
 class AuthController extends Controller
 {
+    public function capabilities()
+    {
+        return [
+            'email_delivery' => config('mail.default') !== 'log' || app()->environment('local', 'testing'),
+            'google' => (bool) (config('services.google.client_id') && config('services.google.client_secret')),
+        ];
+    }
+
     public function login(Request $request)
     {
         $data = $request->validate(['email' => 'required|email', 'password' => 'required|string']);
@@ -36,6 +44,7 @@ class AuthController extends Controller
 
     public function register(Request $request, OfflineOutboxService $outbox)
     {
+        abort_if(app()->environment('production') && config('mail.default') === 'log', 503, 'Email delivery is not configured. Add production SMTP settings before customer registration.');
         $data = $request->validate(['name' => 'required|string|max:120', 'email' => 'required|email:rfc|max:190', 'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()]]);
         $email = Str::lower($data['email']);
         $existing = User::whereRaw('LOWER(email) = ?', [$email])->first();
@@ -45,9 +54,13 @@ class AuthController extends Controller
         $user = $existing ?: new User(['email' => $email, 'role' => 'user', 'is_active' => true]);
         $user->fill(['name' => $data['name'], 'password' => $data['password']])->save();
         $outbox->queueUser($user);
-        $this->sendOtp($user);
+        $developmentCode = $this->sendOtp($user);
 
-        return response()->json(['message' => 'We sent a six-digit verification code to your email.', 'email' => $user->email, 'verification_required' => true], 201);
+        return response()->json([
+            'message' => $developmentCode ? 'Development mail mode: use the verification code shown below.' : 'We sent a six-digit verification code to your email.',
+            'email' => $user->email, 'verification_required' => true,
+            ...($developmentCode ? ['development_code' => $developmentCode] : []),
+        ], 201);
     }
 
     public function verifyOtp(Request $request, OfflineOutboxService $outbox)
@@ -160,11 +173,12 @@ class AuthController extends Controller
         return redirect('/');
     }
 
-    private function sendOtp(User $user): void
+    private function sendOtp(User $user): ?string
     {
         $code = (string) random_int(100000, 999999);
         EmailVerificationOtp::updateOrCreate(['user_id' => $user->id], ['code_hash' => $this->otpHash($code), 'attempts' => 0, 'expires_at' => now()->addMinutes(10), 'sent_at' => now()]);
         Mail::raw("Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.", fn ($mail) => $mail->to($user->email)->subject('Your Nenial verification code'));
+        return config('mail.default') === 'log' && app()->environment('local') ? $code : null;
     }
 
     private function otpHash(string $code): string

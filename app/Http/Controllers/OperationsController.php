@@ -116,9 +116,20 @@ class OperationsController extends Controller
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
 
-        $employee = Employee::create($this->employeeData($r));
+        $number = $r->validate(['employee_number' => 'required|string|max:40'])['employee_number'];
+        $employee = Employee::withTrashed()->where('employee_number', $number)->first();
+        $data = $this->employeeData($r, $employee);
+        if (empty($data['face_subject_id'])) {
+            $data['face_subject_id'] = $employee?->face_subject_id ?: 'FACE-'.Str::upper((string) Str::uuid());
+        }
+        if ($employee) {
+            $employee->fill([...$data, 'is_active' => true])->save();
+            $employee->restore();
+        } else {
+            $employee = Employee::create($data);
+        }
         $outbox->queueEmployee($employee);
-        return response()->json($employee, 201);
+        return response()->json($employee->fresh(), $employee->wasRecentlyCreated ? 201 : 200);
     }
 
     public function employeeUpdate(Request $r, Employee $employee, OfflineOutboxService $outbox)
@@ -308,7 +319,8 @@ class OperationsController extends Controller
         $attendance = AttendanceRecord::whereBetween('attendance_date', [$from->copy()->toDateString(), $to->copy()->toDateString()]);
         $payrollRuns = PayrollRun::with('creator:id,name')->withCount('items')
             ->withSum('items as gross_pay', 'gross_pay')->withSum('items as net_pay', 'net_pay')
-            ->whereBetween('period_start', [$from->toDateString(), $to->toDateString()])->latest('finalized_at')->get();
+            ->whereDate('period_start', '<=', $to->toDateString())
+            ->whereDate('period_end', '>=', $from->toDateString())->latest('finalized_at')->get();
 
         return [
             'range' => [$from, $to],
@@ -378,10 +390,15 @@ class OperationsController extends Controller
         return response()->json([...$record->toArray(), 'already_recorded' => ! $created], $created ? 201 : 200);
     }
 
-    public function deviceEmployees(Request $r)
+    public function deviceEmployees(Request $r, OfflineOutboxService $outbox)
     {
         $device = $r->attributes->get('device');
         abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422, 'A facial-recognition device token is required.');
+
+        Employee::where('is_active', true)->whereNull('face_subject_id')->get()->each(function (Employee $employee) use ($outbox) {
+            $employee->update(['face_subject_id' => 'FACE-'.Str::upper((string) Str::uuid())]);
+            $outbox->queueEmployee($employee->fresh());
+        });
 
         return Employee::where('is_active', true)->whereNotNull('face_subject_id')
             ->orderBy('name')->get(['employee_number', 'name', 'job_title', 'face_subject_id']);
