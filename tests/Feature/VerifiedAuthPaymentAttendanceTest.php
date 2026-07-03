@@ -147,4 +147,22 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
             'discount_percent' => 20, 'idempotency_key' => (string) Str::uuid(),
         ])->assertCreated()->assertJsonPath('discount_total', 28)->assertJsonPath('total', 72);
     }
+
+    public function test_admin_can_cautiously_disable_and_restore_user_access(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $admin->update(['password' => 'AdminAccess2026!']);
+        $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
+
+        $this->actingAs($admin)->deleteJson("/api/users/{$customer->id}", [
+            'current_password' => 'AdminAccess2026!', 'reason' => 'Customer requested temporary suspension.',
+        ])->assertNoContent();
+        $this->assertFalse($customer->fresh()->is_active);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'user.access_disabled', 'auditable_id' => $customer->id]);
+
+        $this->actingAs($admin)->putJson("/api/users/{$customer->id}/restore", [
+            'current_password' => 'AdminAccess2026!', 'reason' => 'Identity was verified by the administrator.',
+        ])->assertOk()->assertJsonPath('is_active', true);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'user.access_restored', 'auditable_id' => $customer->id]);
+    }
 }

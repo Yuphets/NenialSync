@@ -255,11 +255,45 @@ class OperationsController extends Controller
     public function userDestroy(Request $r, User $user, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin' && $user->id !== $r->user()->id, 403);
+        $r->validate(['current_password' => 'required|current_password', 'reason' => 'required|string|min:5|max:500']);
         abort_if($user->role === 'admin' && User::where('role', 'admin')->where('is_active', true)->count() === 1, 422, 'Final admin cannot be removed.');
-        $user->update(['is_active' => false]);
+        abort_unless($user->is_active, 422, 'This account is already disabled.');
+        $before = $user->toArray();
+        DB::transaction(function () use ($r, $user, $before) {
+            $user->update(['is_active' => false]);
+            DB::table('sessions')->where('user_id', $user->id)->delete();
+            DB::table('audit_logs')->insert([
+                'actor_id' => $r->user()->id, 'action' => 'user.access_disabled',
+                'auditable_type' => User::class, 'auditable_id' => $user->id,
+                'before' => json_encode($before), 'after' => json_encode($user->fresh()->toArray()),
+                'metadata' => json_encode(['reason' => $r->input('reason')]),
+                'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
         $outbox->queueUser($user->fresh());
 
         return response()->noContent();
+    }
+
+    public function userRestore(Request $r, User $user, OfflineOutboxService $outbox)
+    {
+        abort_unless($r->user()->role === 'admin', 403);
+        $r->validate(['current_password' => 'required|current_password', 'reason' => 'required|string|min:5|max:500']);
+        abort_if($user->is_active, 422, 'This account already has access.');
+        $before = $user->toArray();
+        DB::transaction(function () use ($r, $user, $before) {
+            $user->update(['is_active' => true]);
+            DB::table('audit_logs')->insert([
+                'actor_id' => $r->user()->id, 'action' => 'user.access_restored',
+                'auditable_type' => User::class, 'auditable_id' => $user->id,
+                'before' => json_encode($before), 'after' => json_encode($user->fresh()->toArray()),
+                'metadata' => json_encode(['reason' => $r->input('reason')]),
+                'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
+        $outbox->queueUser($user->fresh());
+
+        return $user->fresh();
     }
 
     public function passwordTickets(Request $r)

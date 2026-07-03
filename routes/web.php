@@ -52,6 +52,7 @@ Route::prefix('api')->group(function () {
             Route::get('/users', [OperationsController::class, 'users']);
             Route::put('/users/{user}/role', [OperationsController::class, 'userRole']);
             Route::delete('/users/{user}', [OperationsController::class, 'userDestroy']);
+            Route::put('/users/{user}/restore', [OperationsController::class, 'userRestore']);
             Route::get('/password-tickets', [OperationsController::class, 'passwordTickets']);
             Route::post('/users/{user}/password-reset', [OperationsController::class, 'userPasswordReset']);
             Route::get('/devices', [OperationsController::class, 'devices']);
