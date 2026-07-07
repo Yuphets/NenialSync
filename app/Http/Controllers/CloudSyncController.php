@@ -23,6 +23,52 @@ class CloudSyncController extends Controller
         return Product::withTrashed()->orderBy('sku')->get();
     }
 
+    public function product(Request $request)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80',
+            'event_id' => 'required|uuid',
+            'payload.name' => 'required|string|max:190',
+            'payload.sku' => 'required|string|max:80',
+            'payload.barcode' => 'required|string|max:120',
+            'payload.category' => 'required|string|max:80',
+            'payload.supplier' => 'nullable|string|max:190',
+            'payload.unit' => 'required|string|max:32',
+            'payload.price' => 'required|numeric|min:0',
+            'payload.discount_percent' => 'nullable|numeric|min:0|max:100',
+            'payload.stock_quantity' => 'required|integer|min:0',
+            'payload.reserved_quantity' => 'required|integer|min:0',
+            'payload.safety_stock' => 'required|integer|min:0',
+            'payload.reorder_level' => 'required|integer|min:0',
+            'payload.version' => 'required|integer|min:1',
+            'payload.image_url' => 'nullable|string|max:2048',
+            'payload.is_active' => 'required|boolean',
+            'payload.deleted_at' => 'nullable|date',
+        ]);
+
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return Product::withTrashed()->findOrFail($receipt->result_id);
+        }
+
+        $product = DB::transaction(function () use ($data) {
+            $payload = $data['payload'];
+            $product = Product::withTrashed()
+                ->where('sku', $payload['sku'])
+                ->orWhere('barcode', $payload['barcode'])
+                ->first() ?: new Product;
+            $product->forceFill(collect($payload)->except('deleted_at')->all())->save();
+            ($payload['deleted_at'] ?? null) ? $product->delete() : $product->restore();
+            SyncReceipt::create([
+                'node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'product.updated',
+                'result_type' => Product::class, 'result_id' => $product->id, 'received_at' => now(),
+            ]);
+
+            return $product;
+        });
+
+        return response()->json($product, 201);
+    }
+
     public function inventoryActivity()
     {
         return DB::table('inventory_movements')

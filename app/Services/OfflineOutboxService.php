@@ -8,6 +8,7 @@ use App\Models\Employee;
 use App\Models\FaceEnrollment;
 use App\Models\Order;
 use App\Models\Device;
+use App\Models\Product;
 use App\Models\User;
 use App\Models\SyncOutbox;
 use App\Models\PayrollRun;
@@ -15,6 +16,18 @@ use Illuminate\Support\Str;
 
 class OfflineOutboxService
 {
+    public function queueProduct(Product $product): void
+    {
+        $this->queue('product.updated', Product::class, $product->id, [
+            ...$product->only([
+                'name', 'sku', 'barcode', 'category', 'supplier', 'unit', 'price',
+                'discount_percent', 'stock_quantity', 'reserved_quantity', 'safety_stock',
+                'reorder_level', 'version', 'image_url', 'is_active',
+            ]),
+            'deleted_at' => $product->deleted_at?->toIso8601String(),
+        ]);
+    }
+
     public function queueDevice(Device $device): void
     {
         $this->queue('device.updated', Device::class, $device->id, [

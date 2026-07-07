@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Services\InventoryService;
+use App\Services\OfflineOutboxService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -21,7 +22,7 @@ class ProductController extends Controller
         return $q->orderBy('name')->paginate(100);
     }
 
-    public function store(Request $request, InventoryService $inventory)
+    public function store(Request $request, InventoryService $inventory, OfflineOutboxService $outbox)
     {
         $this->admin($request);
         $data = $this->validated($request);
@@ -34,36 +35,42 @@ class ProductController extends Controller
                 ? $inventory->adjust($product, $openingStock, 0, 'opening_stock', $request->user(), 'Opening inventory balance')
                 : $product;
         });
+        $outbox->queueProduct($product->fresh());
 
         return response()->json($product, 201);
     }
 
-    public function update(Request $request, Product $product)
+    public function update(Request $request, Product $product, OfflineOutboxService $outbox)
     {
         $this->admin($request);
         $data = $this->validated($request, $product->id);
         unset($data['stock_quantity']);
         $product->update($data);
+        $outbox->queueProduct($product->fresh());
 
         return $product->fresh();
     }
 
-    public function destroy(Request $request, Product $product)
+    public function destroy(Request $request, Product $product, OfflineOutboxService $outbox)
     {
         $this->admin($request);
         abort_if($product->reserved_quantity > 0, 422, 'Products with active reservations cannot be removed.');
         $product->update(['is_active' => false]);
         $product->delete();
+        $outbox->queueProduct($product);
 
         return response()->noContent();
     }
 
-    public function adjust(Request $request, Product $product, InventoryService $inventory)
+    public function adjust(Request $request, Product $product, InventoryService $inventory, OfflineOutboxService $outbox)
     {
         $this->admin($request);
         $data = $request->validate(['quantity_delta' => 'required|integer|not_in:0', 'reason' => 'required|string|max:255']);
 
-        return $inventory->adjust($product, $data['quantity_delta'], 0, 'manual_adjustment', $request->user(), $data['reason']);
+        $product = $inventory->adjust($product, $data['quantity_delta'], 0, 'manual_adjustment', $request->user(), $data['reason']);
+        $outbox->queueProduct($product->fresh());
+
+        return $product;
     }
 
     public function changes(Request $request)

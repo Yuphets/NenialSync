@@ -27,6 +27,7 @@ Route::prefix('api')->group(function () {
     Route::post('/payments/webhooks/maya', [PaymentController::class, 'maya'])->middleware('throttle:240,1');
     Route::middleware(['sync', 'throttle:240,1'])->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
+        Route::post('/sync/products', [CloudSyncController::class, 'product']);
         Route::get('/sync/inventory-activity', [CloudSyncController::class, 'inventoryActivity']);
         Route::get('/sync/orders', [CloudSyncController::class, 'orders']);
         Route::get('/sync/attendance', [CloudSyncController::class, 'attendances']);

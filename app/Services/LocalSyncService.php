@@ -112,6 +112,13 @@ class LocalSyncService
         $orderPayload = $orderSync ? $this->jsonArray($orders) : [];
         $attendancePayload = $attendanceSync ? $this->jsonArray($attendance) : [];
         $payrollPayload = $payrollSync ? $this->jsonArray($payroll) : [];
+        $remoteSkus = collect($productPayload)->pluck('sku')->filter()->values();
+        if ($remoteSkus->isNotEmpty()) {
+            Product::withTrashed()
+                ->whereNotIn('sku', $remoteSkus->all())
+                ->get()
+                ->each(fn (Product $product) => $this->outbox->queueProduct($product));
+        }
 
         try {
             DB::transaction(function () use ($productPayload, $configurationPayload, $accountSync, $orderPayload, $orderSync, $attendancePayload, $attendanceSync, $payrollPayload, $payrollSync) {
@@ -205,6 +212,7 @@ class LocalSyncService
     {
         $path = match ($event->event_type) {
             'sale.completed' => '/api/sync/sales',
+            'product.updated' => '/api/sync/products',
             'attendance.recorded' => '/api/sync/attendance',
             'user.account_updated' => '/api/sync/users',
             'employee.updated' => '/api/sync/employees',
