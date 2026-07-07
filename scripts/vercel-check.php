@@ -71,6 +71,14 @@ if ($googleClientId || $googleClientSecret || $googleRedirect) {
         $errors[] = 'Google OAuth is partially configured. GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be real Google Cloud OAuth Web Client values.';
     }
 
+    if (! str_ends_with($googleClientId, '.apps.googleusercontent.com')) {
+        $errors[] = 'GOOGLE_CLIENT_ID must come from a Google OAuth Web Client and end with .apps.googleusercontent.com.';
+    }
+
+    if ($googleClientId !== trim((string) getenv('GOOGLE_CLIENT_ID')) || $googleClientSecret !== trim((string) getenv('GOOGLE_CLIENT_SECRET'))) {
+        $errors[] = 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must not contain leading or trailing spaces/newlines.';
+    }
+
     if (! str_starts_with($googleRedirect, 'https://') || ! str_ends_with($googleRedirect, '/auth/google/callback')) {
         $errors[] = 'GOOGLE_REDIRECT_URI must be the exact HTTPS callback URL authorized in Google Cloud, e.g. https://nenialsync.vercel.app/auth/google/callback.';
     }
