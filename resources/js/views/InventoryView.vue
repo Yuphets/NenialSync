@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
 import { useAuthStore } from "../stores/auth";
@@ -9,6 +9,7 @@ const inventory = useInventoryStore();
 const message = ref("");
 const editing = ref(null);
 const showForm = ref(false);
+const search = ref("");
 const empty = {
     name: "",
     sku: "",
@@ -64,6 +65,25 @@ async function adjust(product) {
         message.value = error.response?.data?.message || "Adjustment failed.";
     }
 }
+const visibleProducts = computed(() => {
+    const needle = search.value.trim().toLowerCase();
+    if (!needle) return inventory.products;
+
+    return inventory.products.filter((product) =>
+        [
+            product.name,
+            product.sku,
+            product.barcode,
+            product.category,
+            product.supplier,
+            product.unit,
+            product.is_low_stock ? "reorder low stock" : "healthy",
+        ]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle),
+    );
+});
 </script>
 
 <template>
@@ -79,6 +99,11 @@ async function adjust(product) {
         </button></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
+    <section class="panel filters inline-filters">
+        <label>Search inventory<input v-model="search" placeholder="Product, SKU, barcode, supplier, category"></label>
+        <button v-if="search" class="btn" @click="search = ''">Clear search</button>
+        <small>{{ visibleProducts.length }} of {{ inventory.products.length }} products shown</small>
+    </section>
     <section class="panel table-wrap">
         <table>
             <thead>
@@ -95,7 +120,7 @@ async function adjust(product) {
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="product in inventory.products" :key="product.id">
+                <tr v-for="product in visibleProducts" :key="product.id">
                     <td data-label="Product">
                         <strong>{{ product.name }}</strong
                         ><small
@@ -141,6 +166,7 @@ async function adjust(product) {
                         </div>
                     </td>
                 </tr>
+                <tr v-if="!visibleProducts.length" class="empty-row"><td :colspan="auth.role === 'admin' ? 9 : 8"><div class="empty">No products match your search.</div></td></tr>
             </tbody>
         </table>
     </section>

@@ -16,14 +16,68 @@ const from = ref(
         .slice(0, 10),
 );
 const to = ref(new Date().toISOString().slice(0, 10));
-const search = ref("");
-const filteredInventory = computed(() =>
-    (data.value.inventory || []).filter((item) =>
-        `${item.name} ${item.sku} ${item.category}`
-            .toLowerCase()
-            .includes(search.value.toLowerCase()),
-    ),
-);
+const payrollSearch = ref("");
+const payrollFrom = ref("");
+const payrollTo = ref("");
+const inventorySearch = ref("");
+const inventoryFrom = ref("");
+const inventoryTo = ref("");
+const inDateRange = (value, fromValue, toValue) => {
+    if (!fromValue && !toValue) return true;
+    if (!value) return false;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    const day = date.toISOString().slice(0, 10);
+
+    return (!fromValue || day >= fromValue) && (!toValue || day <= toValue);
+};
+const filteredPayrollRuns = computed(() => {
+    const needle = payrollSearch.value.trim().toLowerCase();
+
+    return (data.value.payroll?.runs || []).filter((run) => {
+        const matchesSearch =
+            !needle ||
+            [
+                run.reference,
+                run.status,
+                run.creator?.name,
+                run.period_start,
+                run.period_end,
+                run.items_count,
+                run.gross_pay,
+                run.net_pay,
+            ]
+                .join(" ")
+                .toLowerCase()
+                .includes(needle);
+        const dateValue = run.finalized_at || run.period_end || run.updated_at;
+
+        return matchesSearch && inDateRange(dateValue, payrollFrom.value, payrollTo.value);
+    });
+});
+const filteredInventoryStats = computed(() => {
+    const needle = inventorySearch.value.trim().toLowerCase();
+
+    return (data.value.inventory || []).filter((product) => {
+        const matchesSearch =
+            !needle ||
+            [
+                product.name,
+                product.sku,
+                product.category,
+                product.supplier,
+                product.available_quantity,
+                product.stock_quantity,
+                product.reserved_quantity,
+            ]
+                .join(" ")
+                .toLowerCase()
+                .includes(needle);
+        const dateValue = product.updated_at || product.created_at;
+
+        return matchesSearch && inDateRange(dateValue, inventoryFrom.value, inventoryTo.value);
+    });
+});
 const money = (value) =>
     Number(value || 0).toLocaleString("en-PH", {
         minimumFractionDigits: 2,
@@ -90,7 +144,7 @@ function csv() {
         ]),
         [],
         ["PRODUCT", "SKU", "On hand", "Reserved", "Available", "Value"],
-        ...filteredInventory.value.map((product) => [
+        ...filteredInventoryStats.value.map((product) => [
             product.name,
             product.sku,
             product.stock_quantity,
@@ -150,10 +204,6 @@ async function downloadBackup() {
     <section class="panel filters">
         <label>From<input v-model="from" type="date" /></label
         ><label>To<input v-model="to" type="date" /></label
-        ><label
-            >Search inventory<input
-                v-model="search"
-                placeholder="Product, SKU, or category" /></label
         ><button class="btn primary" @click="load">Apply period</button>
     </section>
     <div class="stat-grid report-stats">
@@ -261,6 +311,13 @@ async function downloadBackup() {
                 >
             </div>
         </div>
+        <div class="filters inline-filters">
+            <label>Search payroll<input v-model="payrollSearch" placeholder="Reference, approver, period, amount" /></label>
+            <label>Finalized from<input v-model="payrollFrom" type="date" /></label>
+            <label>Finalized to<input v-model="payrollTo" type="date" /></label>
+            <button v-if="payrollSearch || payrollFrom || payrollTo" class="btn" @click="payrollSearch = ''; payrollFrom = ''; payrollTo = ''">Clear payroll filters</button>
+            <small>{{ filteredPayrollRuns.length }} of {{ data.payroll?.runs?.length || 0 }} snapshots shown</small>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -274,7 +331,7 @@ async function downloadBackup() {
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="run in data.payroll?.runs || []" :key="run.id">
+                <tr v-for="run in filteredPayrollRuns" :key="run.id">
                     <td data-label="Reference">
                         <strong>{{ run.reference }}</strong>
                     </td>
@@ -289,9 +346,9 @@ async function downloadBackup() {
                         {{ dateTime(run.finalized_at) }}
                     </td>
                 </tr>
-                <tr v-if="!data.payroll?.runs?.length" class="empty-row">
+                <tr v-if="!filteredPayrollRuns.length" class="empty-row">
                     <td colspan="7">
-                        No finalized payroll runs in this period.
+                        {{ data.payroll?.runs?.length ? 'No finalized payroll snapshots match your filters.' : 'No finalized payroll runs in this period.' }}
                     </td>
                 </tr>
             </tbody>
@@ -301,8 +358,15 @@ async function downloadBackup() {
         <div class="panel-head">
             <div>
                 <h2>Inventory statistics</h2>
-                <small>{{ filteredInventory.length }} matching products</small>
+                <small>{{ filteredInventoryStats.length }} matching products</small>
             </div>
+        </div>
+        <div class="filters inline-filters">
+            <label>Search inventory<input v-model="inventorySearch" placeholder="Product, SKU, category, supplier" /></label>
+            <label>Updated from<input v-model="inventoryFrom" type="date" /></label>
+            <label>Updated to<input v-model="inventoryTo" type="date" /></label>
+            <button v-if="inventorySearch || inventoryFrom || inventoryTo" class="btn" @click="inventorySearch = ''; inventoryFrom = ''; inventoryTo = ''">Clear inventory filters</button>
+            <small>{{ filteredInventoryStats.length }} of {{ data.inventory?.length || 0 }} products shown</small>
         </div>
         <table>
             <thead>
@@ -315,7 +379,7 @@ async function downloadBackup() {
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="product in filteredInventory" :key="product.id">
+                <tr v-for="product in filteredInventoryStats" :key="product.id">
                     <td data-label="Product">
                         <strong>{{ product.name }}</strong
                         ><small
@@ -333,6 +397,7 @@ async function downloadBackup() {
                         ₱{{ money(product.stock_quantity * product.price) }}
                     </td>
                 </tr>
+                <tr v-if="!filteredInventoryStats.length" class="empty-row"><td colspan="5">No inventory records match your filters.</td></tr>
             </tbody>
         </table>
     </section>

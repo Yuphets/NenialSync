@@ -40,11 +40,59 @@ class OperationsController extends Controller
             ];
         }
 
-        $movements = DB::table('inventory_movements')->latest()->limit(12)->get();
+        $movementQuery = DB::table('inventory_movements')
+            ->leftJoin('products', 'products.id', '=', 'inventory_movements.product_id')
+            ->select([
+                'inventory_movements.id', 'inventory_movements.product_id', 'inventory_movements.type',
+                'inventory_movements.quantity_delta', 'inventory_movements.reserved_delta',
+                'inventory_movements.stock_before', 'inventory_movements.stock_after',
+                'inventory_movements.reserved_before', 'inventory_movements.reserved_after',
+                'inventory_movements.reason', 'inventory_movements.created_at', 'inventory_movements.updated_at',
+                'products.name as product_name', 'products.sku as product_sku',
+            ])
+            ->latest('inventory_movements.created_at');
+        if ($search = trim((string) $r->query('activity_search', ''))) {
+            $movementQuery->where(function ($query) use ($search) {
+                $query->where('products.name', 'like', "%{$search}%")
+                    ->orWhere('products.sku', 'like', "%{$search}%")
+                    ->orWhere('inventory_movements.type', 'like', "%{$search}%")
+                    ->orWhere('inventory_movements.reason', 'like', "%{$search}%");
+                if (ctype_digit($search)) {
+                    $query->orWhere('inventory_movements.product_id', (int) $search);
+                }
+            });
+        }
+        if ($from = $r->date('activity_from')) {
+            $movementQuery->whereDate('inventory_movements.created_at', '>=', $from);
+        }
+        if ($to = $r->date('activity_to')) {
+            $movementQuery->whereDate('inventory_movements.created_at', '<=', $to);
+        }
+        $movements = $movementQuery->limit(50)->get();
         if (config('offline.enabled')) {
             $cloudActivity = SyncState::where('key', 'cloud_inventory_activity')->first();
             if ($cloudActivity) {
-                $movements = collect(data_get($cloudActivity->value, 'movements', []))->take(12)->values();
+                $products = Product::withTrashed()->get(['id', 'name', 'sku'])->keyBy('id');
+                $movements = collect(data_get($cloudActivity->value, 'movements', []))
+                    ->map(function ($movement) use ($products) {
+                        $movement = (array) $movement;
+                        $product = $products->get($movement['product_id'] ?? null);
+                        $movement['product_name'] = $product?->name;
+                        $movement['product_sku'] = $product?->sku;
+
+                        return $movement;
+                    })
+                    ->when($search ?? null, fn ($rows) => $rows->filter(fn ($movement) => str_contains(mb_strtolower(implode(' ', [
+                        $movement['product_name'] ?? '',
+                        $movement['product_sku'] ?? '',
+                        $movement['type'] ?? '',
+                        $movement['reason'] ?? '',
+                        $movement['product_id'] ?? '',
+                    ])), mb_strtolower($search))))
+                    ->when($from ?? null, fn ($rows) => $rows->filter(fn ($movement) => Carbon::parse($movement['created_at'] ?? now())->toDateString() >= $from->toDateString()))
+                    ->when($to ?? null, fn ($rows) => $rows->filter(fn ($movement) => Carbon::parse($movement['created_at'] ?? now())->toDateString() <= $to->toDateString()))
+                    ->take(50)
+                    ->values();
             }
         }
 
