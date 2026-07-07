@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AttendanceRecord;
 use App\Models\Sale;
 use App\Models\Employee;
+use App\Models\FaceEnrollment;
 use App\Models\Order;
 use App\Models\Device;
 use App\Models\User;
@@ -100,6 +101,23 @@ class OfflineOutboxService
             'face_subject_id' => $employee->face_subject_id,
             'is_active' => $employee->is_active,
             'deleted_at' => $employee->deleted_at?->toIso8601String(),
+        ]);
+    }
+
+    public function queueFaceEnrollment(FaceEnrollment $enrollment): void
+    {
+        $enrollment->loadMissing('employee', 'device');
+        $this->queue('face.enrollment_updated', FaceEnrollment::class, $enrollment->id, [
+            'employee_number' => $enrollment->employee?->employee_number,
+            'device_external_id' => $enrollment->device?->external_id,
+            'device_name' => $enrollment->device?->name,
+            'device_type' => $enrollment->device?->type,
+            'subject_id' => $enrollment->subject_id,
+            'employee_name' => $enrollment->employee_name,
+            'descriptors' => $enrollment->descriptors,
+            'enrolled_at' => $enrollment->enrolled_at?->toIso8601String(),
+            'is_active' => $enrollment->is_active,
+            'deleted_at' => $enrollment->deleted_at?->toIso8601String(),
         ]);
     }
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AttendanceRecord;
 use App\Models\Device;
 use App\Models\Employee;
+use App\Models\FaceEnrollment;
 use App\Models\Order;
 use App\Models\PayrollRun;
 use App\Models\Product;
@@ -114,6 +115,21 @@ class CloudSyncController extends Controller
                 'created_at' => $device->created_at?->toIso8601String(),
                 'updated_at' => $device->updated_at?->toIso8601String(),
             ]),
+            'face_enrollments' => FaceEnrollment::withTrashed()->with(['employee:id,employee_number', 'device:id,name,type,external_id'])
+                ->orderBy('subject_id')->get()->map(fn (FaceEnrollment $enrollment) => [
+                    'employee_number' => $enrollment->employee?->employee_number,
+                    'device_external_id' => $enrollment->device?->external_id,
+                    'device_name' => $enrollment->device?->name,
+                    'device_type' => $enrollment->device?->type,
+                    'subject_id' => $enrollment->subject_id,
+                    'employee_name' => $enrollment->employee_name,
+                    'descriptors' => $enrollment->descriptors,
+                    'enrolled_at' => $enrollment->enrolled_at?->toIso8601String(),
+                    'is_active' => $enrollment->is_active,
+                    'deleted_at' => $enrollment->deleted_at?->toIso8601String(),
+                    'created_at' => $enrollment->created_at?->toIso8601String(),
+                    'updated_at' => $enrollment->updated_at?->toIso8601String(),
+                ]),
         ];
     }
 
@@ -388,5 +404,57 @@ class CloudSyncController extends Controller
         });
 
         return response()->json($employee, 201);
+    }
+
+    public function faceEnrollment(Request $request)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80', 'event_id' => 'required|uuid',
+            'payload.employee_number' => 'required|string|max:40',
+            'payload.device_external_id' => 'nullable|string|max:255',
+            'payload.device_name' => 'nullable|string|max:255',
+            'payload.device_type' => 'nullable|in:facial,facial_mobile,barcode,pos',
+            'payload.subject_id' => 'required|string|max:190',
+            'payload.employee_name' => 'required|string|max:190',
+            'payload.descriptors' => 'required|array|min:3|max:8',
+            'payload.descriptors.*' => 'required|array|size:128',
+            'payload.descriptors.*.*' => 'numeric',
+            'payload.enrolled_at' => 'nullable|date',
+            'payload.is_active' => 'required|boolean',
+            'payload.deleted_at' => 'nullable|date',
+        ]);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return FaceEnrollment::withTrashed()->findOrFail($receipt->result_id);
+        }
+
+        $enrollment = DB::transaction(function () use ($data) {
+            $payload = $data['payload'];
+            $employee = Employee::withTrashed()->where('employee_number', $payload['employee_number'])->firstOrFail();
+            $device = null;
+            if ($payload['device_external_id'] ?? null) {
+                $device = Device::where('external_id', $payload['device_external_id'])->first();
+            }
+            if (! $device && ($payload['device_name'] ?? null)) {
+                $device = Device::where('name', $payload['device_name'])
+                    ->when($payload['device_type'] ?? null, fn ($query, $type) => $query->where('type', $type))
+                    ->first();
+            }
+
+            $enrollment = FaceEnrollment::withTrashed()->firstOrNew(['subject_id' => $payload['subject_id']]);
+            $enrollment->forceFill([
+                'employee_id' => $employee->id,
+                'device_id' => $device?->id,
+                'employee_name' => $payload['employee_name'],
+                'descriptors' => $payload['descriptors'],
+                'enrolled_at' => $payload['enrolled_at'] ?? now(),
+                'is_active' => $payload['is_active'],
+            ])->save();
+            $payload['deleted_at'] ? $enrollment->delete() : $enrollment->restore();
+            SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'face.enrollment_updated', 'result_type' => FaceEnrollment::class, 'result_id' => $enrollment->id, 'received_at' => now()]);
+
+            return $enrollment;
+        });
+
+        return response()->json($enrollment, 201);
     }
 }

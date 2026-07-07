@@ -7,19 +7,23 @@ import { useAuthStore } from "../stores/auth";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const mode = ref(route.query.mode === "register" ? "register" : "login");
+const mode = ref(
+    ["register", "verify"].includes(route.query.mode)
+        ? route.query.mode
+        : "login",
+);
 const busy = ref(false);
 const error = ref(route.query.oauth_error || "");
 const result = ref("");
 const temporaryPassword = ref("");
 const ticketNumber = ref(localStorage.getItem("nenial-password-ticket") || "");
-const verificationEmail = ref("");
+const verificationEmail = ref(route.query.email || "");
 const capabilities = ref({ email_delivery: true, google: false });
 const resendRemaining = ref(0);
 const showPassword = ref(false);
 const form = reactive({
     name: "",
-    email: "",
+    email: route.query.email || "",
     password: "",
     password_confirmation: "",
     reason: "",

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AttendanceRecord;
 use App\Models\Device;
 use App\Models\Employee;
+use App\Models\FaceEnrollment;
 use App\Models\Order;
 use App\Models\PayrollItem;
 use App\Models\PayrollRun;
@@ -584,6 +585,57 @@ class OperationsController extends Controller
 
         return Employee::where('is_active', true)->whereNotNull('face_subject_id')
             ->orderBy('name')->get(['employee_number', 'name', 'job_title', 'face_subject_id']);
+    }
+
+    public function deviceFaceEnrollments(Request $r)
+    {
+        $device = $r->attributes->get('device');
+        abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422, 'A facial-recognition device token is required.');
+
+        return FaceEnrollment::where('is_active', true)
+            ->orderBy('employee_name')
+            ->get(['subject_id', 'employee_name', 'descriptors', 'enrolled_at', 'updated_at']);
+    }
+
+    public function deviceFaceEnrollmentStore(Request $r, OfflineOutboxService $outbox)
+    {
+        $device = $r->attributes->get('device');
+        abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422, 'A facial-recognition device token is required.');
+        $data = $r->validate([
+            'subject_id' => 'required|string|max:190',
+            'employee_name' => 'required|string|max:190',
+            'descriptors' => 'required|array|min:3|max:8',
+            'descriptors.*' => 'required|array|size:128',
+            'descriptors.*.*' => 'numeric',
+            'enrolled_at' => 'nullable|date',
+        ]);
+        $employee = Employee::where('face_subject_id', $data['subject_id'])->where('is_active', true)->firstOrFail();
+
+        $enrollment = FaceEnrollment::withTrashed()->firstOrNew(['subject_id' => $data['subject_id']]);
+        $enrollment->forceFill([
+            'employee_id' => $employee->id,
+            'device_id' => $device->id,
+            'employee_name' => $employee->name,
+            'descriptors' => $data['descriptors'],
+            'enrolled_at' => $data['enrolled_at'] ?? now(),
+            'is_active' => true,
+        ])->save();
+        $enrollment->restore();
+        $outbox->queueFaceEnrollment($enrollment->fresh(['employee', 'device']));
+
+        return response()->json($enrollment->fresh(), 201);
+    }
+
+    public function deviceFaceEnrollmentDestroy(Request $r, string $subjectId, OfflineOutboxService $outbox)
+    {
+        $device = $r->attributes->get('device');
+        abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422, 'A facial-recognition device token is required.');
+        $enrollment = FaceEnrollment::withTrashed()->where('subject_id', $subjectId)->firstOrFail();
+        $enrollment->forceFill(['is_active' => false, 'device_id' => $device->id])->save();
+        $enrollment->delete();
+        $outbox->queueFaceEnrollment($enrollment->load(['employee', 'device']));
+
+        return response()->noContent();
     }
 
     private function employeeData(Request $r, ?Employee $e = null)

@@ -224,7 +224,10 @@ class AuthController extends Controller
 
         try {
             if (! $this->sendOtpWithResend($user, $code)) {
-                Mail::raw("Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.", fn ($mail) => $mail->to($user->email)->subject('Your Nenial verification code'));
+                Mail::html($this->otpHtml($user, $code), fn ($mail) => $mail
+                    ->to($user->email)
+                    ->from(config('mail.from.address'), $this->mailFromName())
+                    ->subject('Your Nenial verification code'));
             }
         } catch (Throwable $exception) {
             report($exception);
@@ -289,10 +292,11 @@ class AuthController extends Controller
         $response = Http::withToken($apiKey)
             ->acceptJson()
             ->post('https://api.resend.com/emails', [
-                'from' => config('mail.from.name').' <'.$from.'>',
+                'from' => $this->mailFromName().' <'.$from.'>',
                 'to' => [$user->email],
                 'subject' => 'Your Nenial verification code',
-                'text' => "Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.",
+                'text' => $this->otpText($user, $code),
+                'html' => $this->otpHtml($user, $code),
             ]);
 
         if ($response->failed()) {
@@ -305,6 +309,56 @@ class AuthController extends Controller
         }
 
         return true;
+    }
+
+    private function otpText(User $user, string $code): string
+    {
+        return "Hi {$user->name},\n\nYour Nenial verification code is {$code}. It expires in 10 minutes.\n\nOpen Nenial: ".$this->verificationUrl($user)."\n\nIf you did not register, ignore this email.";
+    }
+
+    private function otpHtml(User $user, string $code): string
+    {
+        $url = e($this->verificationUrl($user));
+        $name = e($user->name ?: 'there');
+
+        return <<<HTML
+<!doctype html>
+<html>
+<body style="margin:0;background:#f3f6f4;font-family:Arial,Helvetica,sans-serif;color:#17231e;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6f4;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border:1px solid #dce6df;border-radius:18px;overflow:hidden;">
+        <tr><td style="padding:24px 28px;background:#0d3e28;color:#ffffff;">
+          <div style="font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#8ce0ad;font-weight:700;">Nenial</div>
+          <h1 style="margin:8px 0 0;font-size:26px;line-height:1.2;">Verify your customer account</h1>
+        </td></tr>
+        <tr><td style="padding:28px;">
+          <p style="margin:0 0 16px;font-size:16px;">Hi {$name},</p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.6;">Use this verification code to finish creating your Nenial customer account:</p>
+          <div style="margin:20px 0;padding:18px;border-radius:14px;background:#e7f4ec;text-align:center;font-size:34px;letter-spacing:.18em;font-weight:800;color:#0d3e28;">{$code}</div>
+          <p style="margin:0 0 22px;font-size:14px;color:#68766f;">This code expires in 10 minutes.</p>
+          <p style="margin:0 0 22px;"><a href="{$url}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#176b43;color:#ffffff;text-decoration:none;font-weight:700;">Open Nenial verification page</a></p>
+          <p style="margin:0;font-size:13px;line-height:1.6;color:#68766f;">If the button does not work, copy and paste this link into your browser:<br><a href="{$url}" style="color:#176b43;">{$url}</a></p>
+        </td></tr>
+        <tr><td style="padding:18px 28px;background:#f7faf8;color:#68766f;font-size:12px;">If you did not register for Nenial, you can safely ignore this email.</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+HTML;
+    }
+
+    private function mailFromName(): string
+    {
+        $name = trim((string) config('mail.from.name'));
+
+        return $name === '' || strcasecmp($name, 'Laravel') === 0 ? 'Nenial' : $name;
+    }
+
+    private function verificationUrl(User $user): string
+    {
+        return rtrim(config('app.url'), '/').'/login?mode=verify&email='.urlencode($user->email);
     }
 
     private function mailDeliveryIsConfigured(): bool

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AttendanceRecord;
 use App\Models\Device;
 use App\Models\Employee;
+use App\Models\FaceEnrollment;
 use App\Models\Order;
 use App\Models\PayrollRun;
 use App\Models\Product;
@@ -147,6 +148,7 @@ class LocalSyncService
                 'products' => count($productPayload),
                 'accounts_synced' => false,
                 'devices_synced' => false,
+                'face_enrollments_synced' => false,
                 'activity_synced' => $activitySync,
                 'orders_synced' => false,
                 'attendance_synced' => false,
@@ -157,7 +159,7 @@ class LocalSyncService
             return $this->status(false, $synced, $conflicts, 'Cloud refresh failed while importing data: '.$exception->getMessage());
         }
 
-        $this->rememberCloudState(['products' => count($productPayload), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync && data_get($configurationPayload, 'capabilities.device_sync', false), 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync, 'last_error' => null]);
+        $this->rememberCloudState(['products' => count($productPayload), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync && data_get($configurationPayload, 'capabilities.device_sync', false), 'face_enrollments_synced' => $accountSync && array_key_exists('face_enrollments', $configurationPayload), 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync, 'last_error' => null]);
         if ($activitySync) {
             SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
         }
@@ -190,6 +192,7 @@ class LocalSyncService
             'last_synced_at' => $cloud?->last_synced_at,
             'accounts_synced' => (bool) data_get($cloudValue, 'accounts_synced', false),
             'devices_synced' => (bool) data_get($cloudValue, 'devices_synced', false),
+            'face_enrollments_synced' => (bool) data_get($cloudValue, 'face_enrollments_synced', false),
             'activity_synced' => (bool) data_get($cloudValue, 'activity_synced', false),
             'orders_synced' => (bool) data_get($cloudValue, 'orders_synced', false),
             'attendance_synced' => (bool) data_get($cloudValue, 'attendance_synced', false),
@@ -208,6 +211,7 @@ class LocalSyncService
             'order.placed' => '/api/sync/orders',
             'order.status_updated' => '/api/sync/order-status',
             'device.updated' => '/api/sync/devices',
+            'face.enrollment_updated' => '/api/sync/face-enrollments',
             'payroll.finalized' => '/api/sync/payroll-runs',
             default => throw new RuntimeException("Unsupported sync event {$event->event_type}."),
         };
@@ -357,6 +361,47 @@ class LocalSyncService
                         ->whereNotIn('external_id', $remoteDeviceExternalIds->all()));
                 }
             })->update(['is_active' => false, 'updated_at' => now()]);
+        }
+
+        $remoteEnrollments = collect($configuration['face_enrollments'] ?? [])
+            ->filter(fn ($remote) => is_array($remote) && isset($remote['subject_id'], $remote['descriptors']))
+            ->values();
+        $remoteEnrollmentSubjects = $remoteEnrollments->pluck('subject_id')->filter()->values();
+
+        foreach ($remoteEnrollments as $remote) {
+            $employee = Employee::withTrashed()->where('employee_number', $remote['employee_number'] ?? null)
+                ->orWhere('face_subject_id', $remote['subject_id'])->first();
+            if (! $employee) {
+                continue;
+            }
+
+            $device = null;
+            if ($remote['device_external_id'] ?? null) {
+                $device = Device::where('external_id', $remote['device_external_id'])->first();
+            }
+            if (! $device && ($remote['device_name'] ?? null)) {
+                $device = Device::where('name', $remote['device_name'])
+                    ->when($remote['device_type'] ?? null, fn ($query, $type) => $query->where('type', $type))
+                    ->first();
+            }
+
+            $enrollment = FaceEnrollment::withTrashed()->firstOrNew(['subject_id' => $remote['subject_id']]);
+            $enrollment->forceFill([
+                'employee_id' => $employee->id,
+                'device_id' => $device?->id,
+                'employee_name' => $remote['employee_name'] ?? $employee->name,
+                'descriptors' => $remote['descriptors'],
+                'enrolled_at' => $remote['enrolled_at'] ?? now(),
+                'is_active' => $remote['is_active'] ?? true,
+                'created_at' => $remote['created_at'] ?? $enrollment->created_at,
+                'updated_at' => $remote['updated_at'] ?? $enrollment->updated_at,
+            ])->save();
+            ($remote['deleted_at'] ?? null) ? $enrollment->delete() : $enrollment->restore();
+        }
+
+        if ($remoteEnrollmentSubjects->isNotEmpty()) {
+            FaceEnrollment::whereNotIn('subject_id', $remoteEnrollmentSubjects->all())
+                ->update(['is_active' => false, 'deleted_at' => now(), 'updated_at' => now()]);
         }
     }
 

@@ -19,6 +19,9 @@ Route::prefix('api')->group(function () {
     Route::post('/auth/password-ticket-status', [AuthController::class, 'passwordTicketStatus'])->middleware('throttle:12,1');
     Route::post('/device/attendance', [OperationsController::class, 'deviceAttendance'])->middleware(['device', 'throttle:120,1']);
     Route::get('/device/employees', [OperationsController::class, 'deviceEmployees'])->middleware(['device', 'throttle:60,1']);
+    Route::get('/device/face-enrollments', [OperationsController::class, 'deviceFaceEnrollments'])->middleware(['device', 'throttle:60,1']);
+    Route::post('/device/face-enrollments', [OperationsController::class, 'deviceFaceEnrollmentStore'])->middleware(['device', 'throttle:30,1']);
+    Route::delete('/device/face-enrollments/{subjectId}', [OperationsController::class, 'deviceFaceEnrollmentDestroy'])->middleware(['device', 'throttle:30,1']);
     Route::post('/payments/webhooks/stripe', [PaymentController::class, 'stripe'])->middleware('throttle:240,1');
     Route::post('/payments/webhooks/paymongo', [PaymentController::class, 'payMongo'])->middleware('throttle:240,1');
     Route::post('/payments/webhooks/maya', [PaymentController::class, 'maya'])->middleware('throttle:240,1');
@@ -37,6 +40,7 @@ Route::prefix('api')->group(function () {
         Route::post('/sync/orders', [CloudSyncController::class, 'order']);
         Route::post('/sync/order-status', [CloudSyncController::class, 'orderStatus']);
         Route::post('/sync/devices', [CloudSyncController::class, 'device']);
+        Route::post('/sync/face-enrollments', [CloudSyncController::class, 'faceEnrollment']);
     });
 
     Route::middleware('auth')->group(function () {

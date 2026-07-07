@@ -117,11 +117,14 @@ async function connect() {
         await loadModels();
         employees.value = data;
         localStorage.setItem("nenial-face-device-token", token.value);
-        enrolled.value = await templates();
+        enrolled.value = await loadEnrollments();
         connected.value = true;
         status.value = `${data.length} employees loaded. Start the camera or enroll a face.`;
         clearInterval(employeeTimer);
-        employeeTimer = window.setInterval(() => refreshEmployees(false), 30000);
+        employeeTimer = window.setInterval(async () => {
+            await refreshEmployees(false);
+            enrolled.value = await loadEnrollments(false);
+        }, 30000);
     } catch (error) {
         status.value =
             error.response?.data?.message ||
@@ -147,6 +150,44 @@ async function refreshEmployees(throwOnError = false) {
     }
 }
 
+async function serverEnrollments() {
+    const { data } = await axios.get("/api/device/face-enrollments", {
+        headers: { Authorization: `Bearer ${token.value}` },
+        params: { _: Date.now() },
+    });
+    return Array.isArray(data) ? data : [];
+}
+
+async function saveEnrollment(profile) {
+    const { data } = await axios.post(
+        "/api/device/face-enrollments",
+        profile,
+        { headers: { Authorization: `Bearer ${token.value}` } },
+    );
+    await putTemplate(data);
+    return data;
+}
+
+async function loadEnrollments(throwOnError = false) {
+    try {
+        const remote = await serverEnrollments();
+        for (const profile of remote) await putTemplate(profile);
+
+        const cached = await templates();
+        for (const profile of cached.filter((item) => !remote.some((remoteItem) => remoteItem.subject_id === item.subject_id))) {
+            if (employees.value.some((employee) => employee.face_subject_id === profile.subject_id)) {
+                await saveEnrollment(profile);
+            }
+        }
+
+        return await serverEnrollments();
+    } catch (error) {
+        if (throwOnError) throw error;
+        status.value = "Shared enrollment refresh failed. Using cached templates on this terminal.";
+        return await templates();
+    }
+}
+
 async function startCamera() {
     if (!window.isSecureContext)
         return (status.value = "Camera access requires localhost or HTTPS.");
@@ -163,7 +204,7 @@ async function startCamera() {
         video.value.srcObject = stream;
         await video.value.play();
         running.value = true;
-        status.value = "Camera ready. Face forward and blink when prompted.";
+        status.value = "Camera ready. Face forward and hold still when prompted.";
         livenessUi.value = enrolled.value.length
             ? {
                   visible: true,
@@ -278,13 +319,13 @@ async function enroll() {
                     `This face appears to already be enrolled as ${profile.employee_name}. Remove the incorrect enrollment first.`,
                 );
         }
-        await putTemplate({
+        await saveEnrollment({
             subject_id: selectedEmployee.value.face_subject_id,
             employee_name: selectedEmployee.value.name,
             descriptors: samples,
             enrolled_at: new Date().toISOString(),
         });
-        enrolled.value = await templates();
+        enrolled.value = await loadEnrollments(false);
         liveness = null;
         livenessUi.value = {
             visible: true,
@@ -444,6 +485,34 @@ async function recognize(result) {
         0,
         Math.min(100, ((0.65 - match.distance) / 0.35) * 100),
     );
+    if (identityCandidate?.subject_id === match.profile.subject_id)
+        identityCandidate.frames += 1;
+    else
+        identityCandidate = {
+            subject_id: match.profile.subject_id,
+            frames: 1,
+        };
+    if (identityCandidate.frames < 5) {
+        status.value = `Confirming ${match.profile.employee_name} (${identityCandidate.frames}/5).`;
+        livenessUi.value = {
+            visible: true,
+            title: "Confirming identity",
+            instruction: "Face forward and hold still.",
+            progress: identityCandidate.frames * 18,
+        };
+        return;
+    }
+
+    status.value = `${match.profile.employee_name}: identity confirmed. Recording attendance...`;
+    livenessUi.value = {
+        visible: true,
+        title: "Verified",
+        instruction: "Recording attendance...",
+        progress: 100,
+    };
+    await submitAttendance(match.profile, confidence);
+    return;
+
     const leftEar = eyeAspectRatio(result.landmarks.getLeftEye());
     const rightEar = eyeAspectRatio(result.landmarks.getRightEye());
     const ear = (leftEar + rightEar) / 2;
@@ -649,11 +718,21 @@ async function submitAttendance(profile, confidence) {
 async function forget(profile) {
     if (
         confirm(
-            `Remove the local facial template for ${profile.employee_name}?`,
+            `Remove the shared facial template for ${profile.employee_name}?`,
         )
     ) {
+        try {
+            await axios.delete(
+                `/api/device/face-enrollments/${encodeURIComponent(profile.subject_id)}`,
+                { headers: { Authorization: `Bearer ${token.value}` } },
+            );
+        } catch (error) {
+            status.value =
+                error.response?.data?.message ||
+                "Shared enrollment removal failed. Removing local cache only.";
+        }
         await removeTemplate(profile.subject_id);
-        enrolled.value = await templates();
+        enrolled.value = await loadEnrollments(false);
     }
 }
 
@@ -693,7 +772,7 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                 {{ busy ? "Loading…" : "Connect terminal" }}</button
             ><small
                 >Use this page on <b>localhost</b> or behind HTTPS. The token
-                and facial descriptors remain on this terminal.</small
+                and facial descriptors synchronize with Nenial servers for authorized terminals.</small
             >
         </section>
         <template v-else
@@ -758,7 +837,7 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                             Capture five samples</button
                         ><small
                             >Obtain employee consent. Enrollment stores
-                            numerical descriptors only in this browser.</small
+                            numerical descriptors only; photos are not stored.</small
                         >
                     </section>
                     <section v-if="lastResult" class="terminal-card success">
@@ -771,9 +850,9 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                         >
                     </section>
                     <section class="terminal-card">
-                        <h2>Local enrollments</h2>
+                        <h2>Shared enrollments</h2>
                         <div v-if="!enrolled.length" class="empty">
-                            No employees enrolled on this terminal.
+                            No employees enrolled yet.
                         </div>
                         <div
                             v-for="profile in enrolled"
