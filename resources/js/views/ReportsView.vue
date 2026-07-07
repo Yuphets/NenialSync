@@ -204,7 +204,7 @@ async function downloadBackup() {
         </article>
     </div>
     <div class="two-col report-columns">
-        <section class="panel table-wrap">
+        <section class="panel table-wrap compact-table">
             <div class="panel-head"><h2>Order statistics</h2></div>
             <table>
                 <thead>
@@ -228,7 +228,7 @@ async function downloadBackup() {
                 </tbody>
             </table>
         </section>
-        <section class="panel table-wrap">
+        <section class="panel table-wrap compact-table">
             <div class="panel-head"><h2>Attendance statistics</h2></div>
             <table>
                 <thead>
