@@ -6,18 +6,19 @@ import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
 const form = reactive({ current_password: '', password: '', password_confirmation: '' });
-const message = ref('');
+const passwordMessage = ref('');
+const syncMessage = ref('');
 const showPasswords = ref(false);
 const sync = ref(null);
 const syncing = ref(false);
 
 async function save() {
     try {
-        message.value = (await axios.put('/api/auth/password', form)).data.message;
+        passwordMessage.value = (await axios.put('/api/auth/password', form)).data.message;
         await auth.hydrate();
         Object.assign(form, { current_password: '', password: '', password_confirmation: '' });
     } catch (error) {
-        message.value = error.response?.data?.message || Object.values(error.response?.data?.errors || {})[0]?.[0] || 'Unable to update password.';
+        passwordMessage.value = error.response?.data?.message || Object.values(error.response?.data?.errors || {})[0]?.[0] || 'Unable to update password.';
     }
 }
 
@@ -32,10 +33,12 @@ async function loadSync() {
 
 async function runSync() {
     syncing.value = true;
+    syncMessage.value = '';
     try {
         sync.value = (await axios.post('/api/local-sync/run')).data;
+        syncMessage.value = sync.value?.message || '';
     } catch (error) {
-        message.value = error.response?.data?.message || 'Cloud synchronization failed.';
+        syncMessage.value = error.response?.data?.message || error.response?.data?.sync?.message || 'Cloud synchronization failed.';
         await loadSync();
     } finally {
         syncing.value = false;
@@ -60,7 +63,7 @@ onMounted(loadSync);
             <label>Confirm new password<input v-model="form.password_confirmation" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" required></label>
             <label class="password-toggle"><input v-model="showPasswords" type="checkbox"><span>{{ showPasswords ? 'Hide passwords' : 'Show passwords' }}</span></label>
             <small>Use at least 8 characters with uppercase, lowercase, and a number.</small>
-            <p v-if="message" class="notice">{{ message }}</p>
+            <p v-if="passwordMessage" class="notice">{{ passwordMessage }}</p>
             <button class="btn primary">Update password</button>
         </form>
     </div>
@@ -79,6 +82,6 @@ onMounted(loadSync);
             <div><span>Last synchronized</span><strong>{{ sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Not yet' }}</strong></div>
             <button v-if="sync.enabled" class="btn primary" :disabled="syncing" @click="runSync">{{ syncing ? 'Synchronizing…' : 'Synchronize now' }}</button>
         </div>
-        <p v-if="sync.message" class="notice">{{ sync.message }}</p>
+        <p v-if="syncMessage || sync.message" class="notice">{{ syncMessage || sync.message }}</p>
     </section>
 </template>

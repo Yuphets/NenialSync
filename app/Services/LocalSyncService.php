@@ -17,6 +17,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 class LocalSyncService
 {
@@ -105,32 +106,58 @@ class LocalSyncService
             $payrollSync = false;
         }
 
-        DB::transaction(function () use ($products, $configuration, $accountSync, $orders, $orderSync, $attendance, $attendanceSync, $payroll, $payrollSync) {
-            foreach ($products->json() as $remote) {
-                $product = Product::withTrashed()->firstOrNew(['sku' => $remote['sku']]);
-                $product->fill(collect($remote)->only([
-                    'name', 'barcode', 'category', 'supplier', 'unit', 'price', 'discount_percent',
-                    'stock_quantity', 'reserved_quantity', 'safety_stock', 'reorder_level', 'version', 'image_url', 'is_active',
-                ])->all());
-                $product->deleted_at = $remote['deleted_at'];
-                $product->save();
-            }
+        $productPayload = $this->jsonArray($products);
+        $configurationPayload = $accountSync ? $this->jsonArray($configuration) : [];
+        $orderPayload = $orderSync ? $this->jsonArray($orders) : [];
+        $attendancePayload = $attendanceSync ? $this->jsonArray($attendance) : [];
+        $payrollPayload = $payrollSync ? $this->jsonArray($payroll) : [];
 
-            if ($accountSync) {
-                $this->applyConfiguration($configuration->json());
-            }
-            if ($orderSync) {
-                $this->applyOrders($orders->json());
-            }
-            if ($attendanceSync) {
-                $this->applyAttendance($attendance->json());
-            }
-            if ($payrollSync) {
-                $this->applyPayrollRuns($payroll->json());
-            }
-        });
+        try {
+            DB::transaction(function () use ($productPayload, $configurationPayload, $accountSync, $orderPayload, $orderSync, $attendancePayload, $attendanceSync, $payrollPayload, $payrollSync) {
+                foreach ($productPayload as $remote) {
+                    if (! isset($remote['sku'])) {
+                        continue;
+                    }
 
-        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync, 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync], 'last_synced_at' => now()]);
+                    $product = Product::withTrashed()->firstOrNew(['sku' => $remote['sku']]);
+                    $product->fill(collect($remote)->only([
+                        'name', 'barcode', 'category', 'supplier', 'unit', 'price', 'discount_percent',
+                        'stock_quantity', 'reserved_quantity', 'safety_stock', 'reorder_level', 'version', 'image_url', 'is_active',
+                    ])->all());
+                    $product->deleted_at = $remote['deleted_at'] ?? null;
+                    $product->save();
+                }
+
+                if ($accountSync) {
+                    $this->applyConfiguration($configurationPayload);
+                }
+                if ($orderSync) {
+                    $this->applyOrders($orderPayload);
+                }
+                if ($attendanceSync) {
+                    $this->applyAttendance($attendancePayload);
+                }
+                if ($payrollSync) {
+                    $this->applyPayrollRuns($payrollPayload);
+                }
+            });
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->rememberCloudState([
+                'products' => count($productPayload),
+                'accounts_synced' => false,
+                'devices_synced' => false,
+                'activity_synced' => $activitySync,
+                'orders_synced' => false,
+                'attendance_synced' => false,
+                'payroll_synced' => false,
+                'last_error' => $exception->getMessage(),
+            ]);
+
+            return $this->status(false, $synced, $conflicts, 'Cloud refresh failed while importing data: '.$exception->getMessage());
+        }
+
+        $this->rememberCloudState(['products' => count($productPayload), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync && data_get($configurationPayload, 'capabilities.device_sync', false), 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync, 'last_error' => null]);
         if ($activitySync) {
             SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
         }
@@ -149,6 +176,9 @@ class LocalSyncService
 
     public function status(bool $online = true, int $synced = 0, int $conflicts = 0, ?string $message = null): array
     {
+        $cloud = SyncState::where('key', 'cloud')->first();
+        $cloudValue = $cloud?->value ?? [];
+
         return [
             'enabled' => (bool) config('offline.enabled'),
             'node_id' => config('offline.node_id'),
@@ -157,14 +187,14 @@ class LocalSyncService
             'conflicts' => SyncConflict::where('status', 'open')->count(),
             'synced_now' => $synced,
             'conflicts_now' => $conflicts,
-            'last_synced_at' => SyncState::where('key', 'cloud')->value('last_synced_at'),
-            'accounts_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'accounts_synced', false),
-            'devices_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'devices_synced', false),
-            'activity_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'activity_synced', false),
-            'orders_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'orders_synced', false),
-            'attendance_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'attendance_synced', false),
-            'payroll_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'payroll_synced', false),
-            'message' => $message,
+            'last_synced_at' => $cloud?->last_synced_at,
+            'accounts_synced' => (bool) data_get($cloudValue, 'accounts_synced', false),
+            'devices_synced' => (bool) data_get($cloudValue, 'devices_synced', false),
+            'activity_synced' => (bool) data_get($cloudValue, 'activity_synced', false),
+            'orders_synced' => (bool) data_get($cloudValue, 'orders_synced', false),
+            'attendance_synced' => (bool) data_get($cloudValue, 'attendance_synced', false),
+            'payroll_synced' => (bool) data_get($cloudValue, 'payroll_synced', false),
+            'message' => $message ?: data_get($cloudValue, 'last_error'),
         ];
     }
 
@@ -209,14 +239,23 @@ class LocalSyncService
     private function applyConfiguration(array $configuration): void
     {
         foreach ($configuration['users'] ?? [] as $remote) {
-            $user = null;
-            if ($remote['erased_identity_hash'] ?? null) {
-                $user = User::withTrashed()->get()->first(fn (User $candidate) => hash('sha256', strtolower($candidate->email)) === $remote['erased_identity_hash'] || $candidate->erased_identity_hash === $remote['erased_identity_hash']);
+            if (! isset($remote['email'])) {
+                continue;
+            }
+
+            $user = User::withTrashed()->where('email', $remote['email'])->first();
+            if (! $user && ($remote['erased_identity_hash'] ?? null)) {
+                $user = User::withTrashed()->where('erased_identity_hash', $remote['erased_identity_hash'])->first();
+            }
+            if (! $user && ($remote['erased_identity_hash'] ?? null)) {
+                $user = User::withTrashed()->get()->first(fn (User $candidate) => hash('sha256', strtolower($candidate->email)) === $remote['erased_identity_hash']);
             }
             $user ??= User::withTrashed()->firstOrNew(['email' => $remote['email']]);
             $user->forceFill([
-                'name' => $remote['name'], 'password' => $remote['password_hash'], 'role' => $remote['role'],
-                'is_active' => $remote['is_active'], 'password_changed_at' => $remote['password_changed_at'],
+                'name' => $remote['name'] ?? $remote['email'],
+                'password' => $remote['password_hash'] ?? $user->getRawOriginal('password'),
+                'role' => $remote['role'] ?? $user->role ?? 'user',
+                'is_active' => $remote['is_active'] ?? true, 'password_changed_at' => $remote['password_changed_at'] ?? null,
                 'must_change_password' => $remote['must_change_password'] ?? false,
                 'email_verified_at' => $remote['email_verified_at'] ?? null, 'google_id' => $remote['google_id'] ?? null, 'avatar_url' => $remote['avatar_url'] ?? null,
                 'email' => $remote['email'], 'erased_identity_hash' => $remote['erased_identity_hash'] ?? null,
@@ -224,13 +263,21 @@ class LocalSyncService
             ($remote['deleted_at'] ?? null) ? $user->delete() : $user->restore();
         }
         foreach ($configuration['employees'] ?? [] as $remote) {
+            if (! isset($remote['employee_number'])) {
+                continue;
+            }
+
             $employee = Employee::withTrashed()->firstOrNew(['employee_number' => $remote['employee_number']]);
             $employee->fill(collect($remote)->except(['employee_number', 'user_email', 'deleted_at'])->all());
             $employee->user_id = isset($remote['user_email']) ? User::where('email', $remote['user_email'])->value('id') : null;
             $employee->save();
-            $remote['deleted_at'] ? $employee->delete() : $employee->restore();
+            ($remote['deleted_at'] ?? null) ? $employee->delete() : $employee->restore();
         }
         foreach ($configuration['devices'] ?? [] as $remote) {
+            if (! isset($remote['name'], $remote['type'])) {
+                continue;
+            }
+
             $device = null;
             if ($remote['external_id'] ?? null) {
                 $device = Device::where('external_id', $remote['external_id'])->first();
@@ -254,6 +301,18 @@ class LocalSyncService
                 'updated_at' => $remote['updated_at'] ?? $device->updated_at,
             ])->save();
         }
+    }
+
+    private function jsonArray(?Response $response): array
+    {
+        $payload = $response?->json();
+
+        return is_array($payload) ? $payload : [];
+    }
+
+    private function rememberCloudState(array $value): void
+    {
+        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => $value, 'last_synced_at' => now()]);
     }
 
     private function applyOrders(array $orders): void
