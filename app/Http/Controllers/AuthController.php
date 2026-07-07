@@ -6,6 +6,7 @@ use App\Models\EmailVerificationOtp;
 use App\Models\PasswordResetTicket;
 use App\Models\User;
 use App\Services\OfflineOutboxService;
+use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -196,7 +197,7 @@ class AuthController extends Controller
         } catch (Throwable $exception) {
             report($exception);
 
-            return redirect('/login?oauth_error='.urlencode('Google sign-in could not be completed. Verify the Google client ID, client secret, and authorized redirect URI: '.config('services.google.redirect')));
+            return redirect('/login?oauth_error='.urlencode($this->googleOauthFailureMessage($exception)));
         }
         abort_unless($google->getEmail(), 422, 'Google did not provide a verified email address.');
         $email = Str::lower($google->getEmail());
@@ -228,7 +229,7 @@ class AuthController extends Controller
         } catch (Throwable $exception) {
             report($exception);
             if (! $showDevelopmentCode) {
-                abort(503, 'Verification email could not be delivered. Please check the address and try again shortly.');
+                abort(503, $this->mailDeliveryFailureMessage($exception));
             }
 
             Log::warning('Verification email failed in local development mode; exposing the OTP in the response instead.', [
@@ -244,6 +245,37 @@ class AuthController extends Controller
         return $showDevelopmentCode ? $code : null;
     }
 
+    private function googleOauthFailureMessage(Throwable $exception): string
+    {
+        $base = 'Google sign-in could not be completed.';
+        $hint = 'Verify the Google client ID, client secret, and authorized redirect URI: '.config('services.google.redirect');
+
+        if ($exception instanceof RequestException && $exception->hasResponse()) {
+            $body = (string) $exception->getResponse()->getBody();
+            $payload = json_decode($body, true);
+            $error = data_get($payload, 'error');
+            $description = data_get($payload, 'error_description');
+
+            if ($error || $description) {
+                Log::warning('Google OAuth token exchange failed.', [
+                    'error' => $error,
+                    'description' => $description,
+                    'redirect_uri' => config('services.google.redirect'),
+                ]);
+
+                return trim("{$base} Google returned ".trim($error.' '.$description).". {$hint}");
+            }
+        }
+
+        Log::warning('Google OAuth sign-in failed before profile retrieval.', [
+            'exception' => $exception::class,
+            'message' => $exception->getMessage(),
+            'redirect_uri' => config('services.google.redirect'),
+        ]);
+
+        return "{$base} {$hint}";
+    }
+
     private function sendOtpWithResend(User $user, string $code): bool
     {
         $apiKey = config('services.resend.key');
@@ -252,7 +284,7 @@ class AuthController extends Controller
         }
 
         $from = config('mail.from.address');
-        abort_if(! $from || $from === 'hello@example.com', 503, 'Email delivery needs a verified MAIL_FROM_ADDRESS before verification codes can be sent.');
+        abort_if($this->looksLikePlaceholder($from), 503, 'Email delivery needs a verified MAIL_FROM_ADDRESS before verification codes can be sent.');
 
         $response = Http::withToken($apiKey)
             ->acceptJson()
@@ -282,7 +314,7 @@ class AuthController extends Controller
         }
 
         if (config('services.resend.key')) {
-            return (bool) config('mail.from.address') && config('mail.from.address') !== 'hello@example.com';
+            return ! $this->looksLikePlaceholder((string) config('mail.from.address'));
         }
 
         if (in_array(config('mail.default'), ['log', 'array'], true)) {
@@ -291,11 +323,16 @@ class AuthController extends Controller
 
         if (config('mail.default') === 'smtp') {
             $host = (string) config('mail.mailers.smtp.host');
+            $username = (string) config('mail.mailers.smtp.username');
+            $password = (string) config('mail.mailers.smtp.password');
+            $from = (string) config('mail.from.address');
 
             return $host
                 && ! in_array($host, ['mailpit', 'localhost', '127.0.0.1'], true)
-                && config('mail.from.address')
-                && config('mail.from.address') !== 'hello@example.com';
+                && ! $this->looksLikePlaceholder($host)
+                && ! $this->looksLikePlaceholder($username)
+                && ! $this->looksLikePlaceholder($password)
+                && ! $this->looksLikePlaceholder($from);
         }
 
         return true;
@@ -307,11 +344,66 @@ class AuthController extends Controller
             return 'Email delivery is still using local Mailpit settings. Add real production SMTP settings or RESEND_API_KEY in Vercel.';
         }
 
-        if (! config('mail.from.address') || config('mail.from.address') === 'hello@example.com') {
+        if (config('mail.default') === 'smtp') {
+            foreach ([
+                'MAIL_HOST' => (string) config('mail.mailers.smtp.host'),
+                'MAIL_USERNAME' => (string) config('mail.mailers.smtp.username'),
+                'MAIL_PASSWORD' => (string) config('mail.mailers.smtp.password'),
+                'MAIL_FROM_ADDRESS' => (string) config('mail.from.address'),
+            ] as $key => $value) {
+                if ($this->looksLikePlaceholder($value)) {
+                    return "{$key} is missing or still uses a placeholder value. Add real SMTP credentials from your email provider.";
+                }
+            }
+        }
+
+        if ($this->looksLikePlaceholder((string) config('mail.from.address'))) {
             return 'Email delivery needs a verified MAIL_FROM_ADDRESS before verification codes can be sent.';
         }
 
         return 'Email delivery is not configured. Add real production SMTP settings or RESEND_API_KEY in Vercel.';
+    }
+
+    private function mailDeliveryFailureMessage(Throwable $exception): string
+    {
+        $message = $exception->getMessage();
+        $lower = Str::lower($message);
+        $host = (string) config('mail.mailers.smtp.host');
+        $from = (string) config('mail.from.address');
+
+        if ($exception instanceof RequestException && $exception->hasResponse()) {
+            $payload = json_decode((string) $exception->getResponse()->getBody(), true);
+            $providerMessage = data_get($payload, 'message') ?: data_get($payload, 'error.message') ?: data_get($payload, 'name');
+
+            return $providerMessage
+                ? "Verification email was rejected by the email provider: {$providerMessage}"
+                : 'Verification email was rejected by the email provider. Check the sender domain and API key.';
+        }
+
+        if (str_contains($lower, '535') || str_contains($lower, 'authentication') || str_contains($lower, 'username') || str_contains($lower, 'password')) {
+            return 'SMTP authentication failed. For Gmail, use the Gmail address as MAIL_USERNAME and a 16-character Google App Password as MAIL_PASSWORD.';
+        }
+
+        if (str_contains($lower, 'connection') || str_contains($lower, 'getaddrinfo') || str_contains($lower, 'could not connect') || str_contains($lower, 'timed out')) {
+            return "Could not connect to SMTP host {$host}. Verify MAIL_HOST, MAIL_PORT, and MAIL_SCHEME in Vercel.";
+        }
+
+        if (str_contains($lower, 'sender') || str_contains($lower, 'from') || str_contains($lower, 'relay')) {
+            return "The email provider rejected MAIL_FROM_ADDRESS {$from}. Use a verified sender address from the same provider/account.";
+        }
+
+        return 'Verification email could not be delivered. Check the SMTP/API credentials in Vercel, then redeploy.';
+    }
+
+    private function looksLikePlaceholder(?string $value): bool
+    {
+        $value = Str::lower(trim((string) $value));
+
+        return $value === ''
+            || $value === 'null'
+            || str_starts_with($value, 'your-')
+            || str_contains($value, 'example.com')
+            || in_array($value, ['verified@email.com', 'username', 'password', 'secret', 'client-secret', 'client-id'], true);
     }
 
     private function shouldExposeDevelopmentOtp(): bool
