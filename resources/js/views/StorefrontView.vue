@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import axios from 'axios';
 import { useAuthStore } from '../stores/auth';
 import { useRouter } from 'vue-router';
@@ -14,27 +14,14 @@ const notice = ref('');
 const paying = ref(false);
 const paymentProvider = ref('stripe');
 const categories = ['All', 'Materials', 'Aggregates', 'Tools', 'Safety', 'Finishing'];
-const navEl = ref(null);
 let checkoutKey = null;
-let resizeObserver = null;
 
 watch(cart, value => localStorage.setItem('nenial-cart', JSON.stringify(value)), { deep: true });
 const visible = computed(() => category.value === 'All' ? products.value : products.value.filter(product => product.category === category.value));
 const total = computed(() => cart.value.reduce((sum, item) => sum + item.price * item.quantity * (1 - item.discount_percent / 100), 0));
 const itemCount = computed(() => cart.value.reduce((sum, item) => sum + item.quantity, 0));
 
-function updateNavHeight() {
-    if (!navEl.value) return;
-    document.documentElement.style.setProperty('--store-nav-height', `${navEl.value.offsetHeight}px`);
-}
-
 onMounted(async () => {
-    updateNavHeight();
-    if ('ResizeObserver' in window && navEl.value) {
-        resizeObserver = new ResizeObserver(updateNavHeight);
-        resizeObserver.observe(navEl.value);
-    }
-    window.addEventListener('resize', updateNavHeight);
     try {
         const payload = (await axios.get('/api/storefront/products')).data;
         if (!Array.isArray(payload?.data)) throw new Error('Invalid product response');
@@ -42,13 +29,7 @@ onMounted(async () => {
     } catch {
         products.value = [];
         notice.value = 'Storefront is temporarily unavailable.';
-    } finally { loading.value = false; updateNavHeight(); }
-});
-
-onBeforeUnmount(() => {
-    resizeObserver?.disconnect();
-    window.removeEventListener('resize', updateNavHeight);
-    document.documentElement.style.removeProperty('--store-nav-height');
+    } finally { loading.value = false; }
 });
 
 function add(product) {
@@ -79,7 +60,7 @@ async function checkout() {
 
 <template>
     <div class="store">
-        <header ref="navEl" class="store-nav">
+        <header class="store-nav">
             <a class="brand" href="#"><img src="/media/Nenial.jpg" alt="Nenial"><span>Nenial</span></a>
             <nav aria-label="Product categories"><button v-for="item in categories" :key="item" :class="{ active: category === item }" @click="category = item">{{ item }}</button></nav>
             <div class="store-actions">
@@ -95,6 +76,15 @@ async function checkout() {
 </template>
 
 <style scoped>
+:global(.store) { padding-top: 0 !important; }
+:global(.store-nav) {
+    position: sticky !important;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 10px 26px rgba(5, 28, 17, .16);
+}
+:global(.store-hero),
+:global(.catalog) { scroll-margin-top: 82px; }
 .payment-choice { min-width: 190px; }
 .payment-choice select { min-height: 38px; padding: .45rem .6rem; }
 @media (max-width: 700px) {
