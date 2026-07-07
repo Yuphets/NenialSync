@@ -238,6 +238,12 @@ class LocalSyncService
 
     private function applyConfiguration(array $configuration): void
     {
+        $remoteUserEmails = collect($configuration['users'] ?? [])
+            ->pluck('email')
+            ->filter()
+            ->map(fn (string $email) => mb_strtolower($email))
+            ->values();
+
         foreach ($configuration['users'] ?? [] as $remote) {
             if (! isset($remote['email'])) {
                 continue;
@@ -262,6 +268,22 @@ class LocalSyncService
             ])->save();
             ($remote['deleted_at'] ?? null) ? $user->delete() : $user->restore();
         }
+
+        User::whereNotIn(DB::raw('LOWER(email)'), $remoteUserEmails)
+            ->where('email', 'not like', 'deleted-%@anonymized.invalid')
+            ->where('role', 'user')
+            ->update([
+                'is_active' => false,
+                'must_change_password' => false,
+                'deleted_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        $remoteEmployeeNumbers = collect($configuration['employees'] ?? [])
+            ->pluck('employee_number')
+            ->filter()
+            ->values();
+
         foreach ($configuration['employees'] ?? [] as $remote) {
             if (! isset($remote['employee_number'])) {
                 continue;
@@ -273,6 +295,19 @@ class LocalSyncService
             $employee->save();
             ($remote['deleted_at'] ?? null) ? $employee->delete() : $employee->restore();
         }
+
+        Employee::whereNotIn('employee_number', $remoteEmployeeNumbers)
+            ->update(['is_active' => false, 'deleted_at' => now(), 'updated_at' => now()]);
+
+        $remoteDeviceTokenHashes = collect($configuration['devices'] ?? [])
+            ->pluck('token_hash')
+            ->filter()
+            ->values();
+        $remoteDeviceExternalIds = collect($configuration['devices'] ?? [])
+            ->pluck('external_id')
+            ->filter()
+            ->values();
+
         foreach ($configuration['devices'] ?? [] as $remote) {
             if (! isset($remote['name'], $remote['type'])) {
                 continue;
@@ -285,7 +320,9 @@ class LocalSyncService
             if (! $device && ($remote['token_hash'] ?? null)) {
                 $device = Device::where('token_hash', $remote['token_hash'])->first();
             }
-            $device ??= Device::where('name', $remote['name'])->where('type', $remote['type'])->first();
+            if (! $device && ! ($remote['external_id'] ?? null) && ! ($remote['token_hash'] ?? null)) {
+                $device = Device::where('name', $remote['name'])->where('type', $remote['type'])->first();
+            }
             $device ??= new Device;
             $device->forceFill([
                 'name' => $remote['name'],
@@ -301,6 +338,10 @@ class LocalSyncService
                 'updated_at' => $remote['updated_at'] ?? $device->updated_at,
             ])->save();
         }
+
+        Device::when($remoteDeviceTokenHashes->isNotEmpty(), fn ($query) => $query->whereNotIn('token_hash', $remoteDeviceTokenHashes))
+            ->when($remoteDeviceExternalIds->isNotEmpty(), fn ($query) => $query->where(fn ($inner) => $inner->whereNull('external_id')->orWhereNotIn('external_id', $remoteDeviceExternalIds)))
+            ->update(['is_active' => false, 'updated_at' => now()]);
     }
 
     private function jsonArray(?Response $response): array
