@@ -54,6 +54,11 @@ if ($resendKey) {
     if (in_array(strtolower(env_value('MAIL_HOST')), ['mailpit', 'localhost', '127.0.0.1'], true)) {
         $errors[] = 'MAIL_HOST is still pointing to a local mail server. Production needs a real SMTP host or RESEND_API_KEY.';
     }
+
+    $mailScheme = strtolower(env_value('MAIL_SCHEME'));
+    if ($mailScheme && ! in_array($mailScheme, ['smtp', 'smtps', 'tls', 'starttls', 'ssl'], true)) {
+        $errors[] = 'MAIL_SCHEME must be smtp for port 587 or smtps for port 465. Legacy tls/starttls values are normalized by the app but smtp is recommended.';
+    }
 } else {
     $errors[] = 'Email delivery is not configured for customer OTP verification. Use real SMTP credentials or RESEND_API_KEY.';
 }
