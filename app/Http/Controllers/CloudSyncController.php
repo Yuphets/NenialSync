@@ -3,14 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\AttendanceRecord;
-use App\Models\Employee;
 use App\Models\Device;
+use App\Models\Employee;
 use App\Models\Order;
+use App\Models\PayrollRun;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SyncReceipt;
 use App\Models\User;
-use App\Models\PayrollRun;
 use App\Services\InventoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -110,6 +110,9 @@ class CloudSyncController extends Controller
             'devices' => Device::orderBy('name')->get()->map(fn (Device $device) => [
                 ...$device->only(['name', 'type', 'location', 'provider', 'external_id', 'configuration', 'is_active']),
                 'token_hash' => $device->getRawOriginal('token_hash'),
+                'last_seen_at' => $device->last_seen_at?->toIso8601String(),
+                'created_at' => $device->created_at?->toIso8601String(),
+                'updated_at' => $device->updated_at?->toIso8601String(),
             ]),
         ];
     }
@@ -315,6 +318,7 @@ class CloudSyncController extends Controller
                 $run->items()->create(['employee_id' => $employee->id, ...collect($item)->except('employee_number')->all()]);
             }
             SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'payroll.finalized', 'result_type' => PayrollRun::class, 'result_id' => $run->id, 'received_at' => now()]);
+
             return $run;
         });
 
@@ -333,7 +337,9 @@ class CloudSyncController extends Controller
             'payload.deleted_at' => 'nullable|date',
             'payload.erased_identity_hash' => 'nullable|string|size:64', 'payload.lookup_email' => 'nullable|email|max:190',
         ]);
-        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) return User::findOrFail($receipt->result_id);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return User::findOrFail($receipt->result_id);
+        }
         $user = DB::transaction(function () use ($data) {
             $payload = $data['payload'];
             $user = User::withTrashed()->where('email', $payload['lookup_email'] ?? $payload['email'])
@@ -348,8 +354,10 @@ class CloudSyncController extends Controller
             ])->save();
             $payload['deleted_at'] ? $user->delete() : $user->restore();
             SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'user.account_updated', 'result_type' => User::class, 'result_id' => $user->id, 'received_at' => now()]);
+
             return $user;
         });
+
         return response()->json($user, 201);
     }
 
@@ -364,7 +372,9 @@ class CloudSyncController extends Controller
             'payload.deduction_plan' => 'nullable|array', 'payload.deduction_plan.*' => 'in:sss,pagibig,philhealth',
             'payload.face_subject_id' => 'nullable|string|max:190', 'payload.is_active' => 'required|boolean', 'payload.deleted_at' => 'nullable|date',
         ]);
-        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) return Employee::withTrashed()->findOrFail($receipt->result_id);
+        if ($receipt = SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->first()) {
+            return Employee::withTrashed()->findOrFail($receipt->result_id);
+        }
         $employee = DB::transaction(function () use ($data) {
             $payload = $data['payload'];
             $employee = Employee::withTrashed()->firstOrNew(['employee_number' => $payload['employee_number']]);
@@ -373,8 +383,10 @@ class CloudSyncController extends Controller
             $employee->save();
             $payload['deleted_at'] ? $employee->delete() : $employee->restore();
             SyncReceipt::create(['node_id' => $data['node_id'], 'event_id' => $data['event_id'], 'event_type' => 'employee.updated', 'result_type' => Employee::class, 'result_id' => $employee->id, 'received_at' => now()]);
+
             return $employee;
         });
+
         return response()->json($employee, 201);
     }
 }

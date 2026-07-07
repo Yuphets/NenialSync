@@ -2,18 +2,18 @@
 
 namespace App\Services;
 
-use App\Models\Product;
+use App\Models\AttendanceRecord;
 use App\Models\Device;
 use App\Models\Employee;
 use App\Models\Order;
-use App\Models\AttendanceRecord;
-use App\Models\User;
+use App\Models\PayrollRun;
+use App\Models\Product;
 use App\Models\SyncConflict;
 use App\Models\SyncOutbox;
 use App\Models\SyncState;
-use App\Models\PayrollRun;
-use Illuminate\Http\Client\Response;
+use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -116,13 +116,21 @@ class LocalSyncService
                 $product->save();
             }
 
-            if ($accountSync) $this->applyConfiguration($configuration->json());
-            if ($orderSync) $this->applyOrders($orders->json());
-            if ($attendanceSync) $this->applyAttendance($attendance->json());
-            if ($payrollSync) $this->applyPayrollRuns($payroll->json());
+            if ($accountSync) {
+                $this->applyConfiguration($configuration->json());
+            }
+            if ($orderSync) {
+                $this->applyOrders($orders->json());
+            }
+            if ($attendanceSync) {
+                $this->applyAttendance($attendance->json());
+            }
+            if ($payrollSync) {
+                $this->applyPayrollRuns($payroll->json());
+            }
         });
 
-        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync], 'last_synced_at' => now()]);
+        SyncState::updateOrCreate(['key' => 'cloud'], ['value' => ['products' => count($products->json()), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync, 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync], 'last_synced_at' => now()]);
         if ($activitySync) {
             SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
         }
@@ -151,6 +159,7 @@ class LocalSyncService
             'conflicts_now' => $conflicts,
             'last_synced_at' => SyncState::where('key', 'cloud')->value('last_synced_at'),
             'accounts_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'accounts_synced', false),
+            'devices_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'devices_synced', false),
             'activity_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'activity_synced', false),
             'orders_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'orders_synced', false),
             'attendance_synced' => (bool) data_get(SyncState::where('key', 'cloud')->first()?->value, 'attendance_synced', false),
@@ -222,8 +231,28 @@ class LocalSyncService
             $remote['deleted_at'] ? $employee->delete() : $employee->restore();
         }
         foreach ($configuration['devices'] ?? [] as $remote) {
-            $identity = $remote['external_id'] ? ['external_id' => $remote['external_id']] : ['name' => $remote['name'], 'type' => $remote['type']];
-            Device::updateOrCreate($identity, collect($remote)->except(['external_id'])->all());
+            $device = null;
+            if ($remote['external_id'] ?? null) {
+                $device = Device::where('external_id', $remote['external_id'])->first();
+            }
+            if (! $device && ($remote['token_hash'] ?? null)) {
+                $device = Device::where('token_hash', $remote['token_hash'])->first();
+            }
+            $device ??= Device::where('name', $remote['name'])->where('type', $remote['type'])->first();
+            $device ??= new Device;
+            $device->forceFill([
+                'name' => $remote['name'],
+                'type' => $remote['type'],
+                'location' => $remote['location'] ?? null,
+                'provider' => $remote['provider'] ?? null,
+                'external_id' => $remote['external_id'] ?? null,
+                'token_hash' => $remote['token_hash'] ?? $device->token_hash,
+                'configuration' => $remote['configuration'] ?? null,
+                'is_active' => $remote['is_active'] ?? true,
+                'last_seen_at' => $remote['last_seen_at'] ?? null,
+                'created_at' => $remote['created_at'] ?? $device->created_at,
+                'updated_at' => $remote['updated_at'] ?? $device->updated_at,
+            ])->save();
         }
     }
 
@@ -282,7 +311,9 @@ class LocalSyncService
     {
         foreach ($runs as $remote) {
             $creatorId = User::where('email', $remote['created_by_email'])->value('id');
-            if (! $creatorId) throw new RuntimeException("Cannot synchronize payroll {$remote['reference']}: creator account is missing.");
+            if (! $creatorId) {
+                throw new RuntimeException("Cannot synchronize payroll {$remote['reference']}: creator account is missing.");
+            }
             $run = PayrollRun::where('reference', $remote['reference'])
                 ->orWhere(fn ($query) => $query->whereDate('period_start', $remote['period_start'])->whereDate('period_end', $remote['period_end']))->first();
             $run ??= new PayrollRun;
@@ -292,7 +323,9 @@ class LocalSyncService
             $run->items()->delete();
             foreach ($remote['items'] as $item) {
                 $employeeId = Employee::withTrashed()->where('employee_number', $item['employee_number'])->value('id');
-                if (! $employeeId) throw new RuntimeException("Cannot synchronize payroll {$remote['reference']}: employee {$item['employee_number']} is missing.");
+                if (! $employeeId) {
+                    throw new RuntimeException("Cannot synchronize payroll {$remote['reference']}: employee {$item['employee_number']} is missing.");
+                }
                 $run->items()->create(['employee_id' => $employeeId, ...collect($item)->except('employee_number')->all()]);
             }
         }

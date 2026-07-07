@@ -71,6 +71,7 @@ onMounted(loadSync);
             <div><span>Pending events</span><strong>{{ sync.pending }}</strong></div>
             <div><span>Open conflicts</span><strong>{{ sync.conflicts }}</strong></div>
             <div><span>Accounts & workforce</span><strong>{{ sync.accounts_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Devices</span><strong>{{ sync.devices_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
             <div><span>Inventory activity</span><strong>{{ sync.activity_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
             <div><span>Order fulfillment</span><strong>{{ sync.orders_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
             <div><span>Attendance</span><strong>{{ sync.attendance_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>

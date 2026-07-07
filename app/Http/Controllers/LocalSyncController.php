@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\LocalSyncService;
 use Illuminate\Http\Request;
+use Throwable;
 
 class LocalSyncController extends Controller
 {
@@ -18,6 +19,12 @@ class LocalSyncController extends Controller
     {
         abort_unless($request->user()->isOneOf('admin', 'assistant'), 403);
 
-        return $sync->run();
+        try {
+            return $sync->run();
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return response()->json($sync->status(false, 0, 0, 'Cloud synchronization failed: '.$exception->getMessage()), 200);
+        }
     }
 }
