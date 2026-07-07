@@ -118,6 +118,21 @@ class OperationsController extends Controller
         if ($r->user()->role === 'user') {
             $q->where('customer_id', $r->user()->id);
         }
+        if ($search = trim((string) $r->query('search', ''))) {
+            $q->where(function ($query) use ($search) {
+                $like = '%'.$search.'%';
+                $query->where('reference', 'like', $like)
+                    ->orWhere('status', 'like', $like)
+                    ->orWhere('payment_status', 'like', $like)
+                    ->orWhere('payment_method', 'like', $like)
+                    ->orWhereHas('customer', fn ($customer) => $customer
+                        ->where('name', 'like', $like)
+                        ->orWhere('email', 'like', $like))
+                    ->orWhereHas('items', fn ($items) => $items
+                        ->where('product_name', 'like', $like)
+                        ->orWhere('product_code', 'like', $like));
+            });
+        }
 
         return $q->paginate(50);
     }
@@ -297,10 +312,31 @@ class OperationsController extends Controller
     {
         abort_unless($r->user()->role === 'admin', 403);
         $d = $r->validate(['role' => 'required|in:admin,assistant,cashier,user']);
-        $user->update($d);
+        abort_if(! $user->is_active, 422, 'Restore account access before changing the role.');
+        abort_if($user->id === $r->user()->id && $d['role'] !== 'admin', 422, 'Use another administrator account to change your own administrator role.');
+        abort_if(
+            $user->role === 'admin'
+                && $d['role'] !== 'admin'
+                && User::where('role', 'admin')->where('is_active', true)->where('id', '!=', $user->id)->count() < 1,
+            422,
+            'At least one active administrator must remain.'
+        );
+
+        $before = $user->toArray();
+        DB::transaction(function () use ($r, $user, $d, $before) {
+            $user->update($d);
+            DB::table('audit_logs')->insert([
+                'actor_id' => $r->user()->id, 'action' => 'user.role_changed',
+                'auditable_type' => User::class, 'auditable_id' => $user->id,
+                'before' => json_encode(['role' => $before['role'] ?? null]),
+                'after' => json_encode(['role' => $user->fresh()->role]),
+                'metadata' => json_encode(['target_email' => $user->email]),
+                'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
+            ]);
+        });
         $outbox->queueUser($user->fresh());
 
-        return $user;
+        return $user->fresh();
     }
 
     public function userDestroy(Request $r, User $user, OfflineOutboxService $outbox)
