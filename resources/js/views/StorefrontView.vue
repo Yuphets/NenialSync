@@ -78,16 +78,23 @@ async function checkout() {
 <style scoped>
 :global(.store) { padding-top: 0 !important; }
 :global(.store-nav) {
-    position: sticky !important;
+    position: fixed !important;
     top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
     z-index: 1000;
     box-shadow: 0 10px 26px rgba(5, 28, 17, .16);
 }
+:global(.store-hero) {
+    padding-top: max(132px, calc(70px + env(safe-area-inset-top))) !important;
+}
 :global(.store-hero),
-:global(.catalog) { scroll-margin-top: 82px; }
+:global(.catalog) { scroll-margin-top: 92px; }
 .payment-choice { min-width: 190px; }
 .payment-choice select { min-height: 38px; padding: .45rem .6rem; }
 @media (max-width: 700px) {
+    :global(.store-hero) { padding-top: 190px !important; }
     .cart-dock { right: 10px; bottom: 10px; left: 10px; align-items: stretch; flex-direction: column; gap: 9px; }
     .payment-choice { min-width: 0; }
     .cart-dock .btn { width: 100%; }
