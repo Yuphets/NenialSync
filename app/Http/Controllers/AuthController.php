@@ -2,16 +2,18 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
-use App\Models\PasswordResetTicket;
 use App\Models\EmailVerificationOtp;
+use App\Models\PasswordResetTicket;
+use App\Models\User;
+use App\Services\OfflineOutboxService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Str;
-use App\Services\OfflineOutboxService;
+use Illuminate\Validation\Rules\Password;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\InvalidStateException;
 use Throwable;
@@ -21,8 +23,10 @@ class AuthController extends Controller
     public function capabilities()
     {
         return [
-            'email_delivery' => config('mail.default') !== 'log' || app()->environment('local', 'testing'),
+            'email_delivery' => $this->mailDeliveryIsConfigured(),
+            'mail_from' => config('mail.from.address'),
             'google' => (bool) (config('services.google.client_id') && config('services.google.client_secret')),
+            'google_redirect_uri' => config('services.google.redirect'),
         ];
     }
 
@@ -45,7 +49,7 @@ class AuthController extends Controller
 
     public function register(Request $request, OfflineOutboxService $outbox)
     {
-        abort_if(app()->environment('production') && config('mail.default') === 'log', 503, 'Email delivery is not configured. Add production SMTP settings before customer registration.');
+        abort_unless($this->mailDeliveryIsConfigured(), 503, $this->mailConfigurationMessage());
         $data = $request->validate(['name' => 'required|string|max:120', 'email' => 'required|email:rfc|max:190', 'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()]]);
         $email = Str::lower($data['email']);
         $existing = User::whereRaw('LOWER(email) = ?', [$email])->first();
@@ -70,7 +74,9 @@ class AuthController extends Controller
         $data = $request->validate(['email' => 'required|email', 'code' => 'required|digits:6']);
         $user = User::whereRaw('LOWER(email) = ?', [Str::lower($data['email'])])->where('role', 'user')->firstOrFail();
         if ($user->email_verified_at) {
-            Auth::login($user); $request->session()->regenerate();
+            Auth::login($user);
+            $request->session()->regenerate();
+
             return response()->json(['user' => $user]);
         }
         $otp = EmailVerificationOtp::where('user_id', $user->id)->first();
@@ -78,26 +84,36 @@ class AuthController extends Controller
         abort_if($otp->attempts >= 5, 429, 'Too many incorrect attempts. Request a new code.');
         if (! hash_equals($otp->code_hash, $this->otpHash($data['code']))) {
             $otp->increment('attempts');
+
             return response()->json(['message' => 'The verification code is incorrect.'], 422);
         }
         $user->update(['email_verified_at' => now()]);
         $otp->delete();
         $outbox->queueUser($user->fresh());
-        Auth::login($user); $request->session()->regenerate();
+        Auth::login($user);
+        $request->session()->regenerate();
+
         return response()->json(['user' => $user->fresh()]);
     }
 
     public function resendOtp(Request $request)
     {
+        abort_unless($this->mailDeliveryIsConfigured(), 503, $this->mailConfigurationMessage());
         $data = $request->validate(['email' => 'required|email']);
         $user = User::whereRaw('LOWER(email) = ?', [Str::lower($data['email'])])->where('role', 'user')->where('is_active', true)->whereNull('email_verified_at')->firstOrFail();
         $current = EmailVerificationOtp::where('user_id', $user->id)->first();
         if ($current && $current->sent_at->gt(now()->subSeconds(30))) {
             $retryAfter = (int) ceil(max(1, 30 - $current->sent_at->diffInSeconds(now())));
+
             return response()->json(['message' => "Please wait {$retryAfter} seconds before requesting another code.", 'retry_after' => $retryAfter], 429);
         }
-        $this->sendOtp($user);
-        return ['message' => 'A new verification code was sent.', 'resend_after' => 30];
+        $developmentCode = $this->sendOtp($user);
+
+        return [
+            'message' => $developmentCode ? 'Development mail mode: use the verification code shown below.' : 'A new verification code was sent.',
+            'resend_after' => 30,
+            ...($developmentCode ? ['development_code' => $developmentCode] : []),
+        ];
     }
 
     public function me(Request $request)
@@ -150,16 +166,20 @@ class AuthController extends Controller
     {
         $data = $request->validate(['email' => 'required|email', 'ticket_number' => 'required|uuid']);
         $ticket = PasswordResetTicket::where('ticket_number', $data['ticket_number'])->whereRaw('LOWER(email) = ?', [Str::lower($data['email'])])->firstOrFail();
-        if ($ticket->status !== 'resolved' || ! $ticket->temporary_password) return ['status' => $ticket->status, 'message' => 'Your request is still waiting for an administrator.'];
+        if ($ticket->status !== 'resolved' || ! $ticket->temporary_password) {
+            return ['status' => $ticket->status, 'message' => 'Your request is still waiting for an administrator.'];
+        }
         $password = $ticket->temporary_password;
         $ticket->update(['temporary_password_viewed_at' => now()]);
+
         return ['status' => 'resolved', 'temporary_password' => $password, 'message' => 'Use this temporary password to sign in, then change it immediately.'];
     }
 
     public function googleRedirect()
     {
         abort_unless(config('services.google.client_id') && config('services.google.client_secret'), 503, 'Google sign-in is not configured yet.');
-        return Socialite::driver('google')->scopes(['openid', 'email', 'profile'])->redirect();
+
+        return Socialite::driver('google')->stateless()->scopes(['openid', 'email', 'profile'])->redirect();
     }
 
     public function googleCallback(Request $request, OfflineOutboxService $outbox)
@@ -167,37 +187,147 @@ class AuthController extends Controller
         if ($request->filled('error')) {
             return redirect('/login?oauth_error='.urlencode($request->input('error_description', 'Google sign-in was cancelled or denied.')));
         }
-        try { $google = Socialite::driver('google')->user(); }
-        catch (InvalidStateException $exception) {
+        try {
+            $google = Socialite::driver('google')->stateless()->user();
+        } catch (InvalidStateException $exception) {
             report($exception);
+
             return redirect('/login?oauth_error='.urlencode('The Google sign-in session expired. Please try again without changing browsers.'));
         } catch (Throwable $exception) {
             report($exception);
-            return redirect('/login?oauth_error='.urlencode('Google sign-in could not be completed. The administrator should verify the Google client secret.'));
+
+            return redirect('/login?oauth_error='.urlencode('Google sign-in could not be completed. Verify the Google client ID, client secret, and authorized redirect URI: '.config('services.google.redirect')));
         }
         abort_unless($google->getEmail(), 422, 'Google did not provide a verified email address.');
         $email = Str::lower($google->getEmail());
         $user = User::where('google_id', $google->getId())->orWhereRaw('LOWER(email) = ?', [$email])->first();
-        if ($user && $user->role !== 'user') abort(403, 'Google sign-in is available only for customer accounts.');
-        if ($user && ! $user->is_active) abort(403, 'This account is disabled.');
+        if ($user && $user->role !== 'user') {
+            abort(403, 'Google sign-in is available only for customer accounts.');
+        }
+        if ($user && ! $user->is_active) {
+            abort(403, 'This account is disabled.');
+        }
         $user ??= new User(['email' => $email, 'role' => 'user', 'is_active' => true, 'password' => Str::random(48)]);
         $user->fill(['name' => $google->getName() ?: $email, 'google_id' => $google->getId(), 'avatar_url' => $google->getAvatar(), 'email_verified_at' => now()])->save();
         $outbox->queueUser($user);
-        Auth::login($user); $request->session()->regenerate();
+        Auth::login($user);
+        $request->session()->regenerate();
+
         return redirect('/');
     }
 
     private function sendOtp(User $user): ?string
     {
         $code = (string) random_int(100000, 999999);
+        $showDevelopmentCode = $this->shouldExposeDevelopmentOtp();
+
         try {
-            Mail::raw("Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.", fn ($mail) => $mail->to($user->email)->subject('Your Nenial verification code'));
+            if (! $this->sendOtpWithResend($user, $code)) {
+                Mail::raw("Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.", fn ($mail) => $mail->to($user->email)->subject('Your Nenial verification code'));
+            }
         } catch (Throwable $exception) {
             report($exception);
-            abort(503, 'Verification email could not be delivered. Please check the address and try again shortly.');
+            if (! $showDevelopmentCode) {
+                abort(503, 'Verification email could not be delivered. Please check the address and try again shortly.');
+            }
+
+            Log::warning('Verification email failed in local development mode; exposing the OTP in the response instead.', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'mailer' => config('mail.default'),
+                'host' => config('mail.mailers.smtp.host'),
+            ]);
         }
+
         EmailVerificationOtp::updateOrCreate(['user_id' => $user->id], ['code_hash' => $this->otpHash($code), 'attempts' => 0, 'expires_at' => now()->addMinutes(10), 'sent_at' => now()]);
-        return config('mail.default') === 'log' && app()->environment('local') ? $code : null;
+
+        return $showDevelopmentCode ? $code : null;
+    }
+
+    private function sendOtpWithResend(User $user, string $code): bool
+    {
+        $apiKey = config('services.resend.key');
+        if (! $apiKey) {
+            return false;
+        }
+
+        $from = config('mail.from.address');
+        abort_if(! $from || $from === 'hello@example.com', 503, 'Email delivery needs a verified MAIL_FROM_ADDRESS before verification codes can be sent.');
+
+        $response = Http::withToken($apiKey)
+            ->acceptJson()
+            ->post('https://api.resend.com/emails', [
+                'from' => config('mail.from.name').' <'.$from.'>',
+                'to' => [$user->email],
+                'subject' => 'Your Nenial verification code',
+                'text' => "Your Nenial verification code is {$code}. It expires in 10 minutes. If you did not register, ignore this email.",
+            ]);
+
+        if ($response->failed()) {
+            Log::warning('Resend OTP delivery failed.', [
+                'user_id' => $user->id,
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+            $response->throw();
+        }
+
+        return true;
+    }
+
+    private function mailDeliveryIsConfigured(): bool
+    {
+        if (app()->environment('local') && $this->shouldExposeDevelopmentOtp()) {
+            return true;
+        }
+
+        if (config('services.resend.key')) {
+            return (bool) config('mail.from.address') && config('mail.from.address') !== 'hello@example.com';
+        }
+
+        if (in_array(config('mail.default'), ['log', 'array'], true)) {
+            return false;
+        }
+
+        if (config('mail.default') === 'smtp') {
+            $host = (string) config('mail.mailers.smtp.host');
+
+            return $host
+                && ! in_array($host, ['mailpit', 'localhost', '127.0.0.1'], true)
+                && config('mail.from.address')
+                && config('mail.from.address') !== 'hello@example.com';
+        }
+
+        return true;
+    }
+
+    private function mailConfigurationMessage(): string
+    {
+        if (config('mail.default') === 'smtp' && in_array((string) config('mail.mailers.smtp.host'), ['mailpit', 'localhost', '127.0.0.1'], true)) {
+            return 'Email delivery is still using local Mailpit settings. Add real production SMTP settings or RESEND_API_KEY in Vercel.';
+        }
+
+        if (! config('mail.from.address') || config('mail.from.address') === 'hello@example.com') {
+            return 'Email delivery needs a verified MAIL_FROM_ADDRESS before verification codes can be sent.';
+        }
+
+        return 'Email delivery is not configured. Add real production SMTP settings or RESEND_API_KEY in Vercel.';
+    }
+
+    private function shouldExposeDevelopmentOtp(): bool
+    {
+        if (! app()->environment('local')) {
+            return false;
+        }
+
+        if (in_array(config('mail.default'), ['log', 'array'], true)) {
+            return true;
+        }
+
+        $smtpHost = (string) config('mail.mailers.smtp.host');
+
+        return config('mail.default') === 'smtp'
+            && in_array($smtpHost, ['mailpit', 'localhost', '127.0.0.1'], true);
     }
 
     private function otpHash(string $code): string

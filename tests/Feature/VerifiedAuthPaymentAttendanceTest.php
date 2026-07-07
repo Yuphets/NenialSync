@@ -12,7 +12,9 @@ use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Tests\TestCase;
 
 class VerifiedAuthPaymentAttendanceTest extends TestCase
@@ -72,6 +74,47 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         $this->postJson('/api/auth/verify-email', ['email' => $email, 'code' => $code])
             ->assertOk()->assertJsonPath('user.email', $email);
         $this->assertNotNull($user->fresh()->email_verified_at);
+    }
+
+    public function test_login_throttle_does_not_block_a_different_account_on_the_same_ip(): void
+    {
+        RateLimiter::clear('login');
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.10']);
+
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $this->postJson('/api/auth/login', [
+                'email' => 'first.account@example.com',
+                'password' => 'DefinitelyWrong2026!',
+            ])->assertUnprocessable()->assertJsonPath('message', 'Invalid credentials.');
+        }
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'another.account@example.com',
+            'password' => 'DefinitelyWrong2026!',
+        ])->assertUnprocessable()->assertJsonPath('message', 'Invalid credentials.');
+    }
+
+    public function test_login_throttle_is_scoped_to_the_account_and_client_ip_pair(): void
+    {
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.20'])
+                ->postJson('/api/auth/login', [
+                    'email' => 'rate.limited@example.com',
+                    'password' => 'DefinitelyWrong2026!',
+                ])->assertUnprocessable();
+        }
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.20'])
+            ->postJson('/api/auth/login', [
+                'email' => 'rate.limited@example.com',
+                'password' => 'DefinitelyWrong2026!',
+            ])->assertTooManyRequests();
+
+        $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.21'])
+            ->postJson('/api/auth/login', [
+                'email' => 'rate.limited@example.com',
+                'password' => 'DefinitelyWrong2026!',
+            ])->assertUnprocessable();
     }
 
     public function test_registration_cannot_replace_an_unverified_staff_account(): void
@@ -189,6 +232,27 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         $this->postJson('/api/auth/resend-otp', ['email' => $email])
             ->assertOk()->assertJsonPath('resend_after', 30);
         $this->assertSame(0, $otp->fresh()->attempts);
+    }
+
+    public function test_failed_otp_resend_does_not_replace_the_usable_code_or_start_a_new_cooldown(): void
+    {
+        Mail::fake();
+        $email = 'otp.delivery.failure@example.com';
+        $this->postJson('/api/auth/register', [
+            'name' => 'OTP Delivery Customer', 'email' => $email,
+            'password' => 'CustomerPass2026!', 'password_confirmation' => 'CustomerPass2026!',
+        ])->assertCreated();
+
+        $otp = EmailVerificationOtp::where('user_id', User::where('email', $email)->value('id'))->firstOrFail();
+        $otp->update(['sent_at' => now()->subSeconds(31)]);
+        $original = $otp->fresh()->only(['code_hash', 'attempts', 'expires_at', 'sent_at']);
+
+        Mail::shouldReceive('raw')->once()->andThrow(new RuntimeException('SMTP unavailable'));
+        $this->postJson('/api/auth/resend-otp', ['email' => $email])
+            ->assertStatus(503)
+            ->assertJsonPath('message', 'Verification email could not be delivered. Please check the address and try again shortly.');
+
+        $this->assertSame($original, $otp->fresh()->only(['code_hash', 'attempts', 'expires_at', 'sent_at']));
     }
 
     public function test_admin_can_permanently_erase_a_disabled_account(): void

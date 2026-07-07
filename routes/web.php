@@ -11,10 +11,10 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('api')->group(function () {
     Route::get('/storefront/products', [ProductController::class, 'index']);
     Route::get('/auth/capabilities', [AuthController::class, 'capabilities']);
-    Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
-    Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
-    Route::post('/auth/verify-email', [AuthController::class, 'verifyOtp'])->middleware('throttle:10,1');
-    Route::post('/auth/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:5,1');
+    Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
+    Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth-register');
+    Route::post('/auth/verify-email', [AuthController::class, 'verifyOtp'])->middleware('throttle:auth-otp-verify');
+    Route::post('/auth/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:auth-otp-resend');
     Route::post('/auth/password-tickets', [AuthController::class, 'passwordTicket'])->middleware('throttle:3,10');
     Route::post('/auth/password-ticket-status', [AuthController::class, 'passwordTicketStatus'])->middleware('throttle:12,1');
     Route::post('/device/attendance', [OperationsController::class, 'deviceAttendance'])->middleware(['device', 'throttle:120,1']);
@@ -55,6 +55,7 @@ Route::prefix('api')->group(function () {
             Route::put('/users/{user}/role', [OperationsController::class, 'userRole']);
             Route::delete('/users/{user}', [OperationsController::class, 'userDestroy']);
             Route::put('/users/{user}/restore', [OperationsController::class, 'userRestore']);
+            Route::post('/users/{user}/erase', [OperationsController::class, 'userErase']);
             Route::delete('/users/{user}/erase', [OperationsController::class, 'userErase']);
             Route::post('/admin/backup', [OperationsController::class, 'backup'])->middleware('throttle:3,10');
             Route::get('/password-tickets', [OperationsController::class, 'passwordTickets']);

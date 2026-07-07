@@ -16,6 +16,7 @@ const ticketNumber = ref(localStorage.getItem("nenial-password-ticket") || "");
 const verificationEmail = ref("");
 const capabilities = ref({ email_delivery: true, google: false });
 const resendRemaining = ref(0);
+const showPassword = ref(false);
 const form = reactive({
     name: "",
     email: "",
@@ -108,6 +109,10 @@ async function resendOtp() {
             })
         ).data;
         result.value = data.message;
+        if (data.development_code) {
+            form.code = data.development_code;
+            result.value += ` Code: ${data.development_code}`;
+        }
         startResendCooldown(data.resend_after);
     } catch (exception) {
         const payload = exception.response?.data;
@@ -214,20 +219,36 @@ onBeforeUnmount(() => {
                         required /></label
                 ><template v-if="['login', 'register'].includes(mode)"
                     ><label
-                        >Password<input
-                            v-model="form.password"
-                            type="password"
-                            required
-                            minlength="8"
-                            :autocomplete="
-                                mode === 'login'
-                                    ? 'current-password'
-                                    : 'new-password'
-                            " /></label
+                        >Password
+                        <span class="password-field">
+                            <input
+                                v-model="form.password"
+                                :type="showPassword ? 'text' : 'password'"
+                                required
+                                minlength="8"
+                                :autocomplete="
+                                    mode === 'login'
+                                        ? 'current-password'
+                                        : 'new-password'
+                                "
+                            />
+                            <button
+                                type="button"
+                                class="password-eye"
+                                :aria-label="
+                                    showPassword
+                                        ? 'Hide password'
+                                        : 'Show password'
+                                "
+                                @click="showPassword = !showPassword"
+                            >
+                                {{ showPassword ? "Hide" : "Show" }}
+                            </button>
+                        </span></label
                     ><label v-if="mode === 'register'"
                         >Confirm password<input
                             v-model="form.password_confirmation"
-                            type="password"
+                            :type="showPassword ? 'text' : 'password'"
                             required
                             autocomplete="new-password" /></label></template
                 ><label v-if="mode === 'ticket'"

@@ -127,7 +127,8 @@ Seeder passwords are controlled by `SEED_*_PASSWORD` environment variables. Chan
 - `admin@nenial.com`
 - `assistant@nenial.com`
 - `cashier@nenial.com`
-- Demo customer: `demo.user@nenial.test` / `UserDemo2026!`
+
+Customer accounts should be created through the public sign-up flow so email verification and audit history are preserved. The old published demo customer is disabled by migration/seed and should not be advertised on the login page.
 
 ## Barcode scanner setup
 
@@ -258,8 +259,8 @@ The webhook is idempotent by provider event ID and updates one attendance record
 
 ## Production integration boundaries
 
-- Customer registration sends a six-digit OTP through Laravel mail. In Vercel, configure `MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME=tls`, and a sender address verified by your transactional-email provider. Production registration now stops with an explicit configuration error instead of claiming a code was sent through the `log` mailer.
-- Google sign-in requires a Google Cloud OAuth Web client. Add the production domain under Authorized JavaScript origins, add the exact `https://your-domain/auth/google/callback` redirect URI, then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in Vercel. The login screen disables Google sign-in until those credentials are present. Google—not this repository—controls consent-screen publication and any verification review.
+- Customer registration sends a six-digit OTP through Laravel mail. In Vercel, configure `MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME=tls`, and a sender address verified by your transactional-email provider. Alternatively set `RESEND_API_KEY` plus a verified `MAIL_FROM_ADDRESS` to send OTP through Resend's API. Production registration now stops with an explicit configuration error instead of silently pretending a code was sent through local Mailpit/log mail.
+- Google sign-in requires a Google Cloud OAuth Web client. Add the production domain under Authorized JavaScript origins, add the exact `https://your-domain/auth/google/callback` redirect URI, then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in Vercel. The OAuth flow is stateless for Vercel/serverless reliability. The login screen disables Google sign-in until those credentials are present. Google—not this repository—controls consent-screen publication and any verification review.
 - Card, GCash, and Maya payments use provider-hosted checkout pages; Nenial never receives card or wallet credentials. Configure the environment keys shown in `.env.example`, then register HTTPS webhook endpoints: `/api/payments/webhooks/stripe`, `/api/payments/webhooks/paymongo`, and `/api/payments/webhooks/maya?token=<MAYA_WEBHOOK_SECRET>`. Use sandbox/test keys first and complete each provider's merchant activation before switching to live keys.
 - Online inventory is reserved atomically when an order is placed and deducted only when the customer confirms receipt. A successful gateway webhook records that funds were paid. Paid cancellations are deliberately blocked until staff completes a refund with the provider, preventing a local cancellation from silently leaving customer funds captured.
 - Facial matching occurs locally in the Nenial browser terminal or on a commercial vendor gateway. Browser templates stay on the terminal and are never synchronized to Neon.

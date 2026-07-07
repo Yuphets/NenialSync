@@ -73,7 +73,7 @@ function openErase(user) {
 
 async function eraseAccount() {
     try {
-        await axios.delete(`/api/users/${eraseTarget.value.id}/erase`, { data: eraseForm });
+        await axios.post(`/api/users/${eraseTarget.value.id}/erase`, eraseForm);
         message.value = "The account and identifying profile data were permanently erased. Historical business records remain anonymized.";
         eraseTarget.value = null;
         await load();
