@@ -19,10 +19,10 @@
             </style>
         @endif
     </head>
-    <body class="bg-[#FDFDFC] dark:bg-[#0a0a0a] text-[#1b1b18] flex p-6 lg:p-8 items-center lg:justify-center min-h-screen flex-col">
-        <header class="w-full lg:max-w-4xl max-w-[335px] text-sm mb-6 not-has-[nav]:hidden">
+    <body class="bg-[#FDFDFC] dark:bg-[#0a0a0a] text-[#1b1b18] flex flex-col">
+        <header class="w-full text-sm sticky top-0 z-50 bg-white dark:bg-[#0a0a0a] not-has-[nav]:hidden">
             @if (Route::has('login'))
-                <nav class="flex items-center justify-end gap-4">
+                <nav class="flex items-center justify-end gap-4 max-w-6xl mx-auto px-6 lg:px-8 py-4">
                     @auth
                         <a
                             href="{{ url('/dashboard') }}"
@@ -49,7 +49,25 @@
                 </nav>
             @endif
         </header>
-        <div class="flex items-center justify-center w-full transition-opacity opacity-100 duration-750 lg:grow starting:opacity-0">
+        
+        <!-- Hero Section with Background -->
+        <section class="relative w-full bg-cover bg-center bg-no-repeat py-24 lg:py-32 flex items-center justify-center" style="background-image: url('{{ asset('media/construction-supply-bg.png') }}'); background-attachment: fixed;">
+            <!-- Dark Overlay -->
+            <div class="absolute inset-0 bg-black/60"></div>
+            
+            <!-- Hero Content -->
+            <div class="relative z-10 max-w-4xl mx-auto px-6 lg:px-8 text-center">
+                <h1 class="text-4xl lg:text-5xl font-bold text-white mb-4">Construction supply, connected</h1>
+                <p class="text-lg lg:text-xl text-gray-100 mb-6">Materials in stock. Operations in sync.</p>
+                <p class="text-base lg:text-lg text-gray-200 mb-8">Shop live inventory with protected payment and delivery confirmation.</p>
+                <div class="flex gap-4 justify-center flex-wrap">
+                    <a href="{{ route('login') }}" class="px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition">Get Started</a>
+                    <a href="#learn-more" class="px-8 py-3 bg-white hover:bg-gray-100 text-gray-800 font-semibold rounded-lg transition">Learn More</a>
+                </div>
+            </div>
+        </section>
+
+        <div class="flex items-center justify-center w-full transition-opacity opacity-100 duration-750 lg:grow starting:opacity-0 lg:p-8 p-6">
             <main class="flex max-w-[335px] w-full flex-col-reverse lg:max-w-4xl lg:flex-row">
                 <div class="text-[13px] leading-[20px] flex-1 p-6 pb-6 lg:p-20 lg:pb-10 bg-white dark:bg-[#161615] dark:text-[#EDEDEC] shadow-[inset_0px_0px_0px_1px_rgba(26,26,0,0.16)] dark:shadow-[inset_0px_0px_0px_1px_#fffaed2d] rounded-bl-lg rounded-br-lg lg:rounded-tl-lg lg:rounded-br-none">
                     <h1 class="mb-1 font-medium">Let's get started</h1>
@@ -216,7 +234,7 @@
                     <div class="absolute inset-0 rounded-t-lg lg:rounded-t-none lg:rounded-r-lg shadow-[inset_0px_0px_0px_1px_rgba(26,26,0,0.16)] dark:shadow-[inset_0px_0px_0px_1px_#fffaed2d]"></div>
                 </div>
             </main>
-        </div>
+            </div>
 
         @if (Route::has('login'))
             <div class="h-14.5 hidden lg:block"></div>
