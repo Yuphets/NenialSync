@@ -307,6 +307,12 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </button>
             </div>
         </div>
+        <TablePager
+            v-model:page="payrollPage"
+            v-model:page-size="payrollPageSize"
+            :total="filteredPreview.length"
+            label="employees"
+        />
         <table>
             <thead>
                 <tr>
@@ -407,18 +413,18 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </tr>
             </tbody>
         </table>
-        <TablePager
-            v-model:page="payrollPage"
-            v-model:page-size="payrollPageSize"
-            :total="filteredPreview.length"
-            label="employees"
-        />
     </section>
     <section v-else class="panel table-wrap">
         <div class="panel-head">
             <h2>Facial attendance</h2>
             <span class="live">● Device ready</span>
         </div>
+        <TablePager
+            v-model:page="attendancePage"
+            v-model:page-size="attendancePageSize"
+            :total="filteredAttendance.length"
+            label="attendance records"
+        />
         <table>
             <thead>
                 <tr>
@@ -450,12 +456,6 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </tr>
             </tbody>
         </table>
-        <TablePager
-            v-model:page="attendancePage"
-            v-model:page-size="attendancePageSize"
-            :total="filteredAttendance.length"
-            label="attendance records"
-        />
     </section>
     <div v-if="show" class="modal">
         <form class="modal-card wide" @submit.prevent="save">

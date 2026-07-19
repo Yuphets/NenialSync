@@ -12,7 +12,7 @@ const cart = ref(JSON.parse(localStorage.getItem('nenial-cart') || '[]'));
 const loading = ref(true);
 const notice = ref('');
 const paying = ref(false);
-const paymentProvider = ref('stripe');
+const paymentProvider = 'paymongo';
 const categories = ['All', 'Materials', 'Aggregates', 'Tools', 'Safety', 'Finishing'];
 let checkoutKey = null;
 
@@ -47,8 +47,8 @@ async function checkout() {
     checkoutKey ||= crypto.randomUUID();
     paying.value = true;
     try {
-        const { data: order } = await axios.post('/api/orders', { items: cart.value.map(item => ({ product_id: item.id, quantity: item.quantity })), payment_method: paymentProvider.value, idempotency_key: checkoutKey });
-        const { data: payment } = await axios.post(`/api/orders/${order.id}/payment-checkout`, { provider: paymentProvider.value });
+        const { data: order } = await axios.post('/api/orders', { items: cart.value.map(item => ({ product_id: item.id, quantity: item.quantity })), payment_method: paymentProvider, idempotency_key: checkoutKey });
+        const { data: payment } = await axios.post(`/api/orders/${order.id}/payment-checkout`, { provider: paymentProvider });
         cart.value = []; checkoutKey = null;
         window.location.assign(payment.payment_url);
     } catch (error) {
@@ -71,7 +71,7 @@ async function checkout() {
         </header>
         <section class="store-hero"><div><span class="eyebrow">Construction supply, connected</span><h1>Materials in stock. Operations in sync.</h1><p>Shop live inventory with protected payment and delivery confirmation.</p></div></section>
         <main id="catalog" class="catalog"><div class="section-title"><div><span class="eyebrow">{{ category }} catalog</span><h2>Available products</h2></div><strong>{{ products.length }} live SKUs</strong></div><p v-if="notice" class="notice">{{ notice }}</p><div v-if="loading" class="empty">Loading current inventory…</div><div class="product-grid"><article v-for="product in visible" :key="product.id" class="product-card"><div class="product-image"><img :src="product.image_url || '/media/Background.jpg'" :alt="product.name"></div><span class="tag">{{ product.category }}</span><h3>{{ product.name }}</h3><p>{{ product.supplier }} · {{ product.sku }}</p><div class="product-bottom"><strong>₱{{ Number(product.price).toLocaleString() }}</strong><small :class="{ low: product.is_low_stock }">{{ product.available_quantity }} {{ product.unit }}</small></div><button class="btn primary full" :disabled="product.available_quantity < 1" @click="add(product)">{{ product.available_quantity ? 'Add to cart' : 'Out of stock' }}</button></article></div></main>
-        <aside v-if="cart.length" class="cart-dock"><div class="cart-dock-summary"><span class="cart-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 4h2l2.3 10.1a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H7M10 20a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm9 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg></span><div><strong>{{ itemCount }} items</strong><span>₱{{ total.toLocaleString(undefined, { maximumFractionDigits: 2 }) }}</span></div></div><label class="payment-choice"><span>Pay with</span><select v-model="paymentProvider" aria-label="Payment method"><option value="stripe">Credit / debit card</option><option value="gcash">GCash</option><option value="maya">Maya</option></select></label><button class="btn primary" :disabled="paying" @click="checkout">{{ paying ? 'Opening secure checkout…' : 'Secure checkout' }}</button></aside>
+        <aside v-if="cart.length" class="cart-dock"><div class="cart-dock-summary"><span class="cart-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 4h2l2.3 10.1a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H7M10 20a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm9 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg></span><div><strong>{{ itemCount }} items</strong><span>₱{{ total.toLocaleString(undefined, { maximumFractionDigits: 2 }) }}</span></div></div><div class="payment-choice" aria-label="Payment provider"><span>Secure payment</span><strong>PayMongo</strong><small>Card, GCash or Maya</small></div><button class="btn primary" :disabled="paying" @click="checkout">{{ paying ? 'Opening PayMongo…' : 'Pay securely' }}</button></aside>
     </div>
 </template>
 
@@ -91,8 +91,8 @@ async function checkout() {
 }
 :global(.store-hero),
 :global(.catalog) { scroll-margin-top: 92px; }
-.payment-choice { min-width: 190px; }
-.payment-choice select { min-height: 38px; padding: .45rem .6rem; }
+.payment-choice { display: grid; min-width: 190px; gap: 1px; }
+.payment-choice small { color: var(--muted, #607369); }
 @media (max-width: 700px) {
     :global(.store-hero) { padding-top: 190px !important; }
     .cart-dock { right: 10px; bottom: 10px; left: 10px; align-items: stretch; flex-direction: column; gap: 9px; }

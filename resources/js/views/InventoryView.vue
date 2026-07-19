@@ -114,6 +114,12 @@ const pagedProducts = computed(() =>
         <small>{{ visibleProducts.length }} of {{ inventory.products.length }} products shown</small>
     </section>
     <section class="panel table-wrap">
+        <TablePager
+            v-model:page="page"
+            v-model:page-size="pageSize"
+            :total="visibleProducts.length"
+            label="products"
+        />
         <table>
             <thead>
                 <tr>
@@ -178,12 +184,6 @@ const pagedProducts = computed(() =>
                 <tr v-if="!visibleProducts.length" class="empty-row"><td :colspan="auth.role === 'admin' ? 9 : 8"><div class="empty">No products match your search.</div></td></tr>
             </tbody>
         </table>
-        <TablePager
-            v-model:page="page"
-            v-model:page-size="pageSize"
-            :total="visibleProducts.length"
-            label="products"
-        />
     </section>
     <div v-if="showForm" class="modal">
         <form class="modal-card wide" @submit.prevent="save">

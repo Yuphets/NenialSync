@@ -49,7 +49,7 @@ td select{min-width:140px}
 /* Stable application rail and responsive data controls. */
 html,body,#app{overflow-x:clip}
 .sidebar nav{min-height:0}
-.table-pager{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:13px 18px;border-top:1px solid var(--line);background:#fbfdfc;color:var(--muted);font-size:.78rem}
+.table-pager{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:11px 18px;border-bottom:1px solid var(--line);background:#fbfdfc;color:var(--muted);font-size:.78rem}
 .pager-controls{display:flex;align-items:center;justify-content:flex-end;gap:.65rem}
 .pager-controls label{display:flex;align-items:center;gap:.45rem}
 .pager-controls select{width:70px;min-height:34px;padding:.35rem .5rem}

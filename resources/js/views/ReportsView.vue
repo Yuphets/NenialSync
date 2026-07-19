@@ -335,6 +335,12 @@ async function downloadBackup() {
             <button v-if="payrollSearch || payrollFrom || payrollTo" class="btn" @click="payrollSearch = ''; payrollFrom = ''; payrollTo = ''">Clear payroll filters</button>
             <small>{{ filteredPayrollRuns.length }} of {{ data.payroll?.runs?.length || 0 }} snapshots shown</small>
         </div>
+        <TablePager
+            v-model:page="payrollPage"
+            v-model:page-size="payrollPageSize"
+            :total="filteredPayrollRuns.length"
+            label="payroll snapshots"
+        />
         <table>
             <thead>
                 <tr>
@@ -370,12 +376,6 @@ async function downloadBackup() {
                 </tr>
             </tbody>
         </table>
-        <TablePager
-            v-model:page="payrollPage"
-            v-model:page-size="payrollPageSize"
-            :total="filteredPayrollRuns.length"
-            label="payroll snapshots"
-        />
     </section>
     <section class="panel table-wrap report-detail-panel">
         <div class="panel-head">
@@ -391,6 +391,12 @@ async function downloadBackup() {
             <button v-if="inventorySearch || inventoryFrom || inventoryTo" class="btn" @click="inventorySearch = ''; inventoryFrom = ''; inventoryTo = ''">Clear inventory filters</button>
             <small>{{ filteredInventoryStats.length }} of {{ data.inventory?.length || 0 }} products shown</small>
         </div>
+        <TablePager
+            v-model:page="inventoryPage"
+            v-model:page-size="inventoryPageSize"
+            :total="filteredInventoryStats.length"
+            label="products"
+        />
         <table>
             <thead>
                 <tr>
@@ -423,12 +429,6 @@ async function downloadBackup() {
                 <tr v-if="!filteredInventoryStats.length" class="empty-row"><td colspan="5">No inventory records match your filters.</td></tr>
             </tbody>
         </table>
-        <TablePager
-            v-model:page="inventoryPage"
-            v-model:page-size="inventoryPageSize"
-            :total="filteredInventoryStats.length"
-            label="products"
-        />
     </section>
     <div v-if="showBackup" class="modal"><form class="modal-card" @submit.prevent="downloadBackup"><div class="panel-head"><div><h2>Company data backup</h2><small>Protected JSON export of operational records</small></div><button type="button" class="btn ghost" @click="showBackup = false">Close</button></div><p>The backup excludes passwords, tokens, OAuth identifiers, and facial descriptors. Store the downloaded file securely.</p><label>Your administrator password<input v-model="backupPassword" type="password" autocomplete="current-password" required></label><p v-if="backupError" class="error">{{ backupError }}</p><button class="btn primary full" :disabled="backupBusy">{{ backupBusy ? 'Preparing backup…' : 'Authorize and download backup' }}</button></form></div>
 </template>

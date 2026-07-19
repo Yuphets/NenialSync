@@ -143,7 +143,7 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         $this->assertNotNull($ticket->fresh()->temporary_password_viewed_at);
     }
 
-    public function test_customer_can_open_a_gcash_hosted_checkout_for_their_reserved_order(): void
+    public function test_customer_can_open_a_paymongo_hosted_checkout_for_their_reserved_order(): void
     {
         Http::fake(['api.paymongo.com/*' => Http::response(['data' => [
             'id' => 'cs_test_nenial', 'attributes' => ['checkout_url' => 'https://checkout.paymongo.test/session'],
@@ -153,12 +153,14 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         $product = Product::firstOrFail();
         $order = $this->actingAs($customer)->postJson('/api/orders', [
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
-            'payment_method' => 'gcash', 'idempotency_key' => (string) Str::uuid(),
+            'payment_method' => 'paymongo', 'idempotency_key' => (string) Str::uuid(),
         ])->assertCreated()->json();
 
-        $this->actingAs($customer)->postJson("/api/orders/{$order['id']}/payment-checkout", ['provider' => 'gcash'])
+        $this->actingAs($customer)->postJson("/api/orders/{$order['id']}/payment-checkout", ['provider' => 'paymongo'])
             ->assertOk()->assertJsonPath('payment_url', 'https://checkout.paymongo.test/session');
-        $this->assertDatabaseHas('orders', ['id' => $order['id'], 'payment_provider' => 'gcash', 'provider_session_id' => 'cs_test_nenial']);
+        $this->assertDatabaseHas('orders', ['id' => $order['id'], 'payment_provider' => 'paymongo', 'provider_session_id' => 'cs_test_nenial']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.paymongo.com/v1/checkout_sessions'
+            && $request['data']['attributes']['payment_method_types'] === ['card', 'gcash', 'paymaya']);
     }
 
     public function test_new_employee_is_enrollable_and_removed_number_can_be_reactivated(): void

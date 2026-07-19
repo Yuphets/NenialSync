@@ -151,6 +151,13 @@ onMounted(load);
             </div>
             <span class="tag">{{ tickets.length }} open</span>
         </div>
+        <TablePager
+            v-if="tickets.length"
+            v-model:page="ticketPage"
+            v-model:page-size="ticketPageSize"
+            :total="tickets.length"
+            label="tickets"
+        />
         <div v-if="!tickets.length" class="empty">
             No open password tickets.
         </div>
@@ -175,13 +182,6 @@ onMounted(load);
                 </button>
             </article>
         </div>
-        <TablePager
-            v-if="tickets.length"
-            v-model:page="ticketPage"
-            v-model:page-size="ticketPageSize"
-            :total="tickets.length"
-            label="tickets"
-        />
     </section>
 
     <section class="panel">
@@ -192,6 +192,12 @@ onMounted(load);
                     placeholder="Name or email"
             /></label>
         </div>
+        <TablePager
+            v-model:page="userPage"
+            v-model:page-size="userPageSize"
+            :total="filtered.length"
+            label="users"
+        />
         <div class="table-wrap">
             <table>
                 <thead>
@@ -254,12 +260,6 @@ onMounted(load);
                 </tbody>
             </table>
         </div>
-        <TablePager
-            v-model:page="userPage"
-            v-model:page-size="userPageSize"
-            :total="filtered.length"
-            label="users"
-        />
     </section>
 
     <div v-if="eraseTarget" class="modal"><form class="modal-card" @submit.prevent="eraseAccount"><div class="panel-head"><div><h2>Permanently erase account</h2><small>{{ eraseTarget.name }} · {{ eraseTarget.email }}</small></div><button type="button" class="btn ghost" @click="eraseTarget = null">Close</button></div><p class="error">This cannot be undone. Personal profile and login data will be anonymized permanently. Historical orders and audit records remain for company accounting.</p><label>Reason<textarea v-model="eraseForm.reason" rows="3" minlength="10" required></textarea></label><label>Type the account email<input v-model="eraseForm.email_confirmation" type="email" required></label><label>Type PERMANENTLY ERASE<input v-model="eraseForm.confirmation_phrase" required></label><label>Your administrator password<input v-model="eraseForm.current_password" type="password" autocomplete="current-password" required></label><button class="btn danger full">Permanently erase this account</button></form></div>

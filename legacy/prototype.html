@@ -2227,7 +2227,7 @@
         let loggedInUser = null;
         let userAccessSearch = "";
         let pendingCheckout = false;
-        let selectedPayment = "Stripe card";
+        let selectedPayment = "PayMongo";
         let lastReceipt = null;
         let orders = [];
 
@@ -2775,7 +2775,7 @@
                         <div><strong>Protected payment:</strong> your payment remains on hold until the order is delivered and you confirm that all materials were received.</div>
                     </div>
                     <div class="pay-options">
-                        <label class="pay-option"><input type="radio" name="payMethod" value="Stripe card" ${selectedPayment === "Stripe card" ? "checked" : ""}> <span><strong>Stripe</strong><br><span class="stock">Reference for card and online payment flow.</span></span></label>
+                        <label class="pay-option"><input type="radio" name="payMethod" value="PayMongo" ${selectedPayment === "PayMongo" ? "checked" : ""}> <span><strong>PayMongo</strong><br><span class="stock">Secure card and online payment checkout.</span></span></label>
                         <label class="pay-option"><input type="radio" name="payMethod" value="GCash e-wallet" ${selectedPayment === "GCash e-wallet" ? "checked" : ""}> <span><strong>GCash</strong><br><span class="stock">Reference for local e-wallet payment.</span></span></label>
                     </div>
                     ${cart.length > 0 ? `<button class="btn primary" id="payNowBtn"><i class="fas fa-shield-halved"></i>Place protected order</button>` : ""}
@@ -2931,7 +2931,7 @@
                     <div class="customer-copy">
                         <span class="pill"><i class="fas fa-hard-hat"></i>Customer Workspace</span>
                         <h3 class="inline-offset">Order construction materials with a cleaner checkout flow.</h3>
-                        <p>Your cart is separated from staff operations. Review materials, choose Stripe or GCash as the payment reference, and keep buying activity focused.</p>
+                        <p>Your cart is separated from staff operations. Review materials, pay securely through PayMongo, and keep buying activity focused.</p>
                         <div class="hero-toolbar">
                             <button class="landing-btn light" id="customerShopBtn"><i class="fas fa-store"></i>Browse Products</button>
                             <button class="landing-btn" id="customerCheckoutBtn" ${cart.length && canOrder ? "" : "disabled"} title="${!canOrder ? "Checkout is disabled during preview" : cart.length ? "Review protected checkout" : "Add a product before checking out"}"><i class="fas fa-cart-shopping"></i>${!canOrder ? "Preview Only" : cart.length ? "Review Cart" : "Cart Empty"}</button>
@@ -2942,7 +2942,7 @@
                         <div class="row-between inline-offset"><span>Items</span><strong>${cartQty()}</strong></div>
                         <div class="row-between"><span>Subtotal</span><strong>${peso(subtotal)}</strong></div>
                         <div class="pay-options">
-                            <div class="pay-option"><i class="fab fa-stripe-s"></i><span>Stripe card reference</span></div>
+                            <div class="pay-option"><i class="fas fa-credit-card"></i><span>PayMongo secure checkout</span></div>
                             <div class="pay-option"><i class="fas fa-mobile-screen"></i><span>GCash e-wallet reference</span></div>
                         </div>
                     </div>
@@ -3173,7 +3173,7 @@
                         <div class="card-body">
                             ${checkoutCartHtml(true)}
                             <div class="pay-options">
-                                <div class="pay-option"><i class="fab fa-stripe-s"></i><span><strong>Stripe</strong><br><span class="stock">Card payment held until receipt</span></span></div>
+                                <div class="pay-option"><i class="fas fa-credit-card"></i><span><strong>PayMongo</strong><br><span class="stock">Secure payment held until receipt</span></span></div>
                                 <div class="pay-option"><i class="fas fa-mobile-screen"></i><span><strong>GCash</strong><br><span class="stock">E-wallet payment held until receipt</span></span></div>
                             </div>
                             ${canOrder && cart.length > 0 ? '<button class="btn primary" id="openCheckoutBtn" type="button"><i class="fas fa-shield-halved"></i>Protected Checkout</button>' : ""}

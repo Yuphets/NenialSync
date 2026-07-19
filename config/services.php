@@ -41,21 +41,10 @@ return [
         'redirect' => trim((string) env('GOOGLE_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost'), '/').'/auth/google/callback')),
     ],
 
-    'stripe' => [
-        'secret' => env('STRIPE_SECRET'),
-        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-    ],
-
     'paymongo' => [
         'secret' => env('PAYMONGO_SECRET_KEY'),
         'webhook_secret' => env('PAYMONGO_WEBHOOK_SECRET'),
-    ],
-
-    'maya' => [
-        'public_key' => env('MAYA_PUBLIC_KEY'),
-        'secret_key' => env('MAYA_SECRET_KEY'),
-        'base_url' => env('MAYA_BASE_URL', 'https://pg-sandbox.paymaya.com'),
-        'webhook_secret' => env('MAYA_WEBHOOK_SECRET'),
+        'payment_methods' => array_values(array_filter(array_map('trim', explode(',', env('PAYMONGO_PAYMENT_METHODS') ?: 'card,gcash,paymaya')))),
     ],
 
 ];

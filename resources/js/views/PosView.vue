@@ -376,29 +376,62 @@ async function checkout() {
 </template>
 
 <style scoped>
-.pos-workstation { align-items: stretch; }
-.product-library { display: flex; flex-direction: column; min-height: 680px; }
+.pos-workstation {
+    grid-template-columns: minmax(390px, .82fr) minmax(0, 1.28fr);
+    align-items: stretch;
+    gap: 14px;
+}
+.product-library,
+.sale-ticket {
+    min-height: max(620px, calc(100dvh - 150px));
+}
+.product-library { display: flex; flex-direction: column; }
 .pos-panel-head h2 { margin: 0 0 .2rem; }
 .register-state { padding: .35rem .65rem; border-radius: 999px; color: var(--brand); background: var(--soft); font-size: .72rem; font-weight: 800; }
 .pos-scanner { grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; padding-bottom: 8px; }
 .scan-field { min-width: 0; }
+.pos-scanner .btn { min-width: 88px; padding-inline: .75rem; white-space: nowrap; }
 .pos-search { margin: 0 12px 10px; }
 .category-strip { display: flex; gap: .4rem; padding: 0 12px 10px; overflow-x: auto; }
 .category-strip button { flex: 0 0 auto; padding: .48rem .72rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font-size: .74rem; font-weight: 750; }
 .category-strip button.active { border-color: var(--brand); color: #fff; background: var(--brand); }
-.pos-keys { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; flex: 1; max-height: 520px; }
-.pos-keys button { position: relative; align-content: start; min-height: 118px; padding: 13px; }
+.pos-keys {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(152px, auto);
+    align-content: start;
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overscroll-behavior: contain;
+}
+.pos-keys button {
+    position: relative;
+    grid-template-rows: auto minmax(2.6em, auto) minmax(2.7em, auto) auto;
+    align-content: start;
+    min-width: 0;
+    min-height: 152px;
+    padding: 13px;
+    overflow: hidden;
+}
+.pos-keys button strong,
+.pos-keys button small { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+.pos-keys button b { align-self: end; margin-top: auto; }
 .pos-keys button:hover:not(:disabled) { border-color: #91bca2; background: #f4faf6; }
 .product-tile-category { color: var(--muted); font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .product-empty { grid-column: 1 / -1; }
-.sale-ticket { display: flex; flex-direction: column; min-height: 680px; }
+.sale-ticket { display: flex; flex-direction: column; min-width: 0; }
 .ticket-head { padding: 17px 20px; }
 .ticket-head-actions { display: flex; align-items: center; gap: .55rem; }
 .clear-ticket { padding: .35rem .6rem; border: 1px solid rgba(255,255,255,.35); border-radius: 7px; color: #fff; background: transparent; font-size: .72rem; font-weight: 750; }
-.ticket-column-head { display: grid; grid-template-columns: minmax(0,1fr) 116px 110px; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); color: var(--muted); background: #f7faf8; font-size: .66rem; font-weight: 850; text-transform: uppercase; letter-spacing: .05em; }
+.ticket-column-head,
+.ticket-line { grid-template-columns: minmax(0, 1fr) clamp(92px, 18%, 116px) minmax(88px, 110px); }
+.ticket-column-head { display: grid; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); color: var(--muted); background: #f7faf8; font-size: .66rem; font-weight: 850; text-transform: uppercase; letter-spacing: .05em; }
 .ticket-column-head span:nth-child(2) { text-align: center; }
 .ticket-column-head span:last-child { text-align: right; }
-.ticket-lines { flex: 1; min-height: 190px; max-height: 340px; overflow-y: auto; }
+.ticket-lines { flex: 1; min-height: 130px; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
+.ticket-line > div:first-child,
+.ticket-line strong,
+.ticket-line small { min-width: 0; overflow-wrap: anywhere; }
 .ticket-empty { display: grid; place-content: center; gap: .35rem; min-height: 180px; }
 .ticket-empty strong { color: var(--ink); font-size: 1rem; }
 .ticket-discount { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -411,18 +444,24 @@ async function checkout() {
 .tender-grid button { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-weight: 750; }
 .tender-grid button.active { border-color: var(--brand); color: var(--brand); background: var(--soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .tender-note { color: var(--muted); line-height: 1.4; }
-@media (max-width: 1280px) {
-    .pos-workstation { grid-template-columns: minmax(320px,.78fr) minmax(430px,1.22fr); }
-}
-@media (max-width: 1050px) {
-    .product-library, .sale-ticket { min-height: 0; }
+@media (max-width: 1240px) {
+    .pos-workstation { grid-template-columns: minmax(0, 1fr); }
+    .product-library,
+    .sale-ticket { min-height: 0; }
+    .product-library { max-height: min(680px, 78dvh); }
+    .sale-ticket { min-height: 620px; }
     .pos-keys { grid-template-columns: repeat(3,minmax(0,1fr)); max-height: 430px; }
+}
+@media (max-width: 900px) {
+    .pos-keys { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 700px) {
     .pos-scanner { grid-template-columns: 1fr 1fr; }
     .scan-field { grid-column: 1 / -1; }
     .pos-keys { grid-template-columns: repeat(2,minmax(0,1fr)); }
     .ticket-column-head { display: none; }
+    .ticket-line { grid-template-columns: minmax(0, 1fr); }
+    .ticket-line > b { text-align: left; }
     .tender-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 430px) {

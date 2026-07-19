@@ -22,9 +22,7 @@ Route::prefix('api')->group(function () {
     Route::get('/device/face-enrollments', [OperationsController::class, 'deviceFaceEnrollments'])->middleware(['device', 'throttle:60,1']);
     Route::post('/device/face-enrollments', [OperationsController::class, 'deviceFaceEnrollmentStore'])->middleware(['device', 'throttle:30,1']);
     Route::delete('/device/face-enrollments/{subjectId}', [OperationsController::class, 'deviceFaceEnrollmentDestroy'])->middleware(['device', 'throttle:30,1']);
-    Route::post('/payments/webhooks/stripe', [PaymentController::class, 'stripe'])->middleware('throttle:240,1');
     Route::post('/payments/webhooks/paymongo', [PaymentController::class, 'payMongo'])->middleware('throttle:240,1');
-    Route::post('/payments/webhooks/maya', [PaymentController::class, 'maya'])->middleware('throttle:240,1');
     Route::middleware(['sync', 'throttle:240,1'])->group(function () {
         Route::get('/sync/products', [CloudSyncController::class, 'products']);
         Route::post('/sync/products', [CloudSyncController::class, 'product']);
