@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
+import TablePager from "../components/TablePager.vue";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
@@ -14,6 +15,10 @@ const show = ref(false);
 const saving = ref(null);
 const exporting = ref(false);
 const search = ref("");
+const payrollPage = ref(1);
+const payrollPageSize = ref(5);
+const attendancePage = ref(1);
+const attendancePageSize = ref(5);
 const deductionDrafts = reactive({});
 const incentiveDrafts = reactive({});
 const deductions = [
@@ -36,6 +41,18 @@ let attendanceTimer;
 const matchesSearch = (employee) => `${employee?.name || ""} ${employee?.employee_number || ""} ${employee?.job_title || ""}`.toLowerCase().includes(search.value.trim().toLowerCase());
 const filteredPreview = computed(() => preview.value.filter((row) => matchesSearch(row.employee)));
 const filteredAttendance = computed(() => attendance.value.filter((record) => matchesSearch(record.employee)));
+const pagedPreview = computed(() =>
+    filteredPreview.value.slice(
+        (payrollPage.value - 1) * payrollPageSize.value,
+        payrollPage.value * payrollPageSize.value,
+    ),
+);
+const pagedAttendance = computed(() =>
+    filteredAttendance.value.slice(
+        (attendancePage.value - 1) * attendancePageSize.value,
+        attendancePage.value * attendancePageSize.value,
+    ),
+);
 
 async function loadPayroll() {
     const [employeeResponse, previewResponse] = await Promise.all([
@@ -297,15 +314,13 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                     <th>Deduction plan</th>
                     <th>Incentive</th>
                     <th>Gross</th>
-                    <th>SSS</th>
-                    <th>Pag-IBIG</th>
-                    <th>PhilHealth</th>
+                    <th>Statutory deductions</th>
                     <th>Net</th>
                     <th v-if="auth.role === 'admin'">Action</th>
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="row in filteredPreview" :key="row.employee.id">
+                <tr v-for="row in pagedPreview" :key="row.employee.id">
                     <td data-label="Employee">
                         <div>
                             <strong>{{ row.employee.name }}</strong
@@ -371,12 +386,12 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                         <span v-else>₱{{ row.calculation.incentive }}</span>
                     </td>
                     <td data-label="Gross">₱{{ row.calculation.gross_pay }}</td>
-                    <td data-label="SSS">₱{{ row.calculation.sss }}</td>
-                    <td data-label="Pag-IBIG">
-                        ₱{{ row.calculation.pagibig }}
-                    </td>
-                    <td data-label="PhilHealth">
-                        ₱{{ row.calculation.philhealth }}
+                    <td data-label="Statutory deductions">
+                        <div class="deduction-breakdown">
+                            <span>SSS <b>₱{{ row.calculation.sss }}</b></span>
+                            <span>Pag-IBIG <b>₱{{ row.calculation.pagibig }}</b></span>
+                            <span>PhilHealth <b>₱{{ row.calculation.philhealth }}</b></span>
+                        </div>
                     </td>
                     <td data-label="Net">
                         <strong>₱{{ row.calculation.net_pay }}</strong>
@@ -392,6 +407,12 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </tr>
             </tbody>
         </table>
+        <TablePager
+            v-model:page="payrollPage"
+            v-model:page-size="payrollPageSize"
+            :total="filteredPreview.length"
+            label="employees"
+        />
     </section>
     <section v-else class="panel table-wrap">
         <div class="panel-head">
@@ -409,7 +430,7 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="record in filteredAttendance" :key="record.id">
+                <tr v-for="record in pagedAttendance" :key="record.id">
                     <td data-label="Employee">{{ record.employee?.name }}</td>
                     <td data-label="Date and time">
                         {{ formatAttendanceDate(record) }}
@@ -429,6 +450,12 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </tr>
             </tbody>
         </table>
+        <TablePager
+            v-model:page="attendancePage"
+            v-model:page-size="attendancePageSize"
+            :total="filteredAttendance.length"
+            label="attendance records"
+        />
     </section>
     <div v-if="show" class="modal">
         <form class="modal-card wide" @submit.prevent="save">
@@ -480,5 +507,9 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
 </template>
 <style scoped>
 .workforce-search { width: min(280px, 70vw); }
+.incentive-control { display: grid; grid-template-columns: minmax(90px, 1fr) auto; gap: .4rem; min-width: 155px; }
+.deduction-breakdown { display: grid; gap: .3rem; min-width: 145px; }
+.deduction-breakdown span { display: flex; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: .74rem; }
+.deduction-breakdown b { color: var(--ink); }
 @media (max-width: 700px) { .workforce-search { width: 100%; } }
 </style>

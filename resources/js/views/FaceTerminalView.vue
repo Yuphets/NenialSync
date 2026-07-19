@@ -13,6 +13,7 @@ const status = ref("Enter the facial device token to begin.");
 const connected = ref(false);
 const running = ref(false);
 const busy = ref(false);
+const terminalMode = ref("preview");
 const lastResult = ref(null);
 const enrolled = ref([]);
 const livenessUi = ref({
@@ -204,21 +205,14 @@ async function startCamera() {
         video.value.srcObject = stream;
         await video.value.play();
         running.value = true;
-        status.value = "Camera ready. Face forward and hold still when prompted.";
-        livenessUi.value = enrolled.value.length
-            ? {
-                  visible: true,
-                  title: "Ready to scan",
-                  instruction: "Center one face inside the frame.",
-                  progress: 0,
-              }
-            : {
-                  visible: true,
-                  title: "Enrollment required",
-                  instruction:
-                      "Enroll an employee before recording attendance.",
-                  progress: 0,
-              };
+        terminalMode.value = "preview";
+        status.value = "Camera ready. Choose enrollment or start attendance scanning.";
+        livenessUi.value = {
+            visible: true,
+            title: "Preview mode",
+            instruction: "Attendance scanning is paused.",
+            progress: 0,
+        };
         loop();
     } catch {
         status.value =
@@ -230,6 +224,7 @@ function stopCamera() {
     clearTimeout(timer);
     timer = null;
     running.value = false;
+    terminalMode.value = "preview";
     liveness = null;
     identityCandidate = null;
     missedFrames = 0;
@@ -241,6 +236,38 @@ function stopCamera() {
     };
     stream?.getTracks().forEach((track) => track.stop());
     stream = null;
+}
+
+async function startAttendance() {
+    if (!running.value) await startCamera();
+    if (!running.value) return;
+    if (!enrolled.value.length) {
+        status.value = "Enroll at least one employee before recording attendance.";
+        return;
+    }
+    terminalMode.value = "attendance";
+    identityCandidate = null;
+    missedFrames = 0;
+    status.value = "Attendance scanning active. Center one face inside the frame.";
+    livenessUi.value = {
+        visible: true,
+        title: "Attendance mode",
+        instruction: "Center one face and hold still.",
+        progress: 0,
+    };
+}
+
+function pauseAttendance() {
+    terminalMode.value = "preview";
+    identityCandidate = null;
+    liveness = null;
+    status.value = "Attendance scanning paused. The camera remains available for preview or enrollment.";
+    livenessUi.value = {
+        visible: true,
+        title: "Preview mode",
+        instruction: "Attendance will not be recorded.",
+        progress: 0,
+    };
 }
 
 async function descriptor() {
@@ -255,9 +282,17 @@ async function descriptor() {
 async function enroll() {
     if (!selectedEmployee.value)
         return (status.value = "Select an employee first.");
-    if (!running.value) await startCamera();
-    if (!running.value) return;
     busy.value = true;
+    terminalMode.value = "enrollment";
+    identityCandidate = null;
+    liveness = null;
+    if (!running.value) await startCamera();
+    if (!running.value) {
+        busy.value = false;
+        terminalMode.value = "preview";
+        return;
+    }
+    terminalMode.value = "enrollment";
     const samples = [];
     const poses = [
         "face forward",
@@ -284,6 +319,7 @@ async function enroll() {
                 throw new Error(
                     "Move closer and use brighter, even front lighting.",
                 );
+            draw(result);
             samples.push(Array.from(result.descriptor));
         }
         const withinProfile = samples.flatMap((sample, index) =>
@@ -330,14 +366,15 @@ async function enroll() {
         livenessUi.value = {
             visible: true,
             title: "Enrollment complete",
-            instruction: "Face forward when ready to record attendance.",
+            instruction: "Attendance remains paused until Start attendance is selected.",
             progress: 0,
         };
-        status.value = `${selectedEmployee.value.name} enrolled successfully. No photo was stored.`;
+        status.value = `${selectedEmployee.value.name} enrolled successfully. Attendance was not recorded.`;
     } catch (error) {
         status.value = error.message;
     } finally {
         busy.value = false;
+        terminalMode.value = "preview";
     }
 }
 
@@ -363,13 +400,24 @@ function headTurnRatio(landmarks) {
 
 async function loop() {
     if (!running.value) return;
+    if (terminalMode.value !== "attendance") {
+        draw(null);
+        timer = setTimeout(loop, 250);
+        return;
+    }
     try {
         const result = await descriptor();
         draw(result);
-        if (result && enrolled.value.length && !busy.value) {
+        if (
+            terminalMode.value === "attendance" &&
+            result &&
+            enrolled.value.length &&
+            !busy.value
+        ) {
             missedFrames = 0;
             await recognize(result);
         } else if (
+            terminalMode.value === "attendance" &&
             !result &&
             enrolled.value.length &&
             !busy.value &&
@@ -778,8 +826,8 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
         <template v-else
             ><div class="terminal-grid">
                 <section class="camera-stage">
-                    <video ref="video" muted playsinline></video
-                    ><canvas ref="canvas"></canvas>
+                    <video ref="video" class="mirrored-camera" muted playsinline></video
+                    ><canvas ref="canvas" class="mirrored-camera"></canvas>
                     <div
                         v-if="running && livenessUi.visible"
                         class="liveness-guide"
@@ -804,15 +852,35 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                     <div v-if="!running" class="camera-placeholder">
                         Camera is off
                     </div>
-                    <button
-                        v-if="!running"
-                        class="btn primary"
-                        @click="startCamera"
-                    >
-                        Start camera</button
-                    ><button v-else class="btn" @click="stopCamera">
-                        Stop camera
-                    </button>
+                    <div class="camera-controls">
+                        <button
+                            v-if="!running"
+                            class="btn primary"
+                            @click="startCamera"
+                        >
+                            Start camera
+                        </button>
+                        <template v-else>
+                            <button
+                                v-if="terminalMode !== 'attendance'"
+                                class="btn primary"
+                                :disabled="busy || !enrolled.length"
+                                @click="startAttendance"
+                            >
+                                Start attendance
+                            </button>
+                            <button
+                                v-else
+                                class="btn light"
+                                @click="pauseAttendance"
+                            >
+                                Pause attendance
+                            </button>
+                            <button class="btn" :disabled="busy" @click="stopCamera">
+                                Stop camera
+                            </button>
+                        </template>
+                    </div>
                 </section>
                 <aside>
                     <section class="terminal-card">
@@ -837,7 +905,7 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                             Capture five samples</button
                         ><small
                             >Obtain employee consent. Enrollment stores
-                            numerical descriptors only; photos are not stored.</small
+                            numerical descriptors only; photos are not stored. Attendance remains paused after enrollment.</small
                         >
                     </section>
                     <section v-if="lastResult" class="terminal-card success">
@@ -882,4 +950,15 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
 </template>
 <style scoped>
 .enrollment-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.mirrored-camera { transform: scaleX(-1); }
+.camera-controls {
+    position: absolute;
+    z-index: 4;
+    bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+}
+.camera-stage .camera-controls .btn { position: static; }
 </style>

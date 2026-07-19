@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
                         startTicketPolling();
                     "
                 >
-                    Forgot password? Request admin assistance</button
+                    Forgot password?</button
                 ><button
                     v-if="mode === 'ticket' && ticketNumber"
                     type="button"

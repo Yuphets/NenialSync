@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
+import TablePager from "../components/TablePager.vue";
 import { useAuthStore } from "../stores/auth";
 import { useInventoryStore } from "../stores/inventory";
 const auth = useAuthStore();
@@ -10,6 +11,8 @@ const message = ref("");
 const editing = ref(null);
 const showForm = ref(false);
 const search = ref("");
+const page = ref(1);
+const pageSize = ref(5);
 const empty = {
     name: "",
     sku: "",
@@ -84,6 +87,12 @@ const visibleProducts = computed(() => {
             .includes(needle),
     );
 });
+const pagedProducts = computed(() =>
+    visibleProducts.value.slice(
+        (page.value - 1) * pageSize.value,
+        page.value * pageSize.value,
+    ),
+);
 </script>
 
 <template>
@@ -120,7 +129,7 @@ const visibleProducts = computed(() => {
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="product in visibleProducts" :key="product.id">
+                <tr v-for="product in pagedProducts" :key="product.id">
                     <td data-label="Product">
                         <strong>{{ product.name }}</strong
                         ><small
@@ -169,6 +178,12 @@ const visibleProducts = computed(() => {
                 <tr v-if="!visibleProducts.length" class="empty-row"><td :colspan="auth.role === 'admin' ? 9 : 8"><div class="empty">No products match your search.</div></td></tr>
             </tbody>
         </table>
+        <TablePager
+            v-model:page="page"
+            v-model:page-size="pageSize"
+            :total="visibleProducts.length"
+            label="products"
+        />
     </section>
     <div v-if="showForm" class="modal">
         <form class="modal-card wide" @submit.prevent="save">

@@ -2,12 +2,17 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
+import TablePager from "../components/TablePager.vue";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
 const users = ref([]);
 const tickets = ref([]);
 const search = ref("");
+const userPage = ref(1);
+const userPageSize = ref(5);
+const ticketPage = ref(1);
+const ticketPageSize = ref(5);
 const message = ref("");
 const selected = ref(null);
 const accessTarget = ref(null);
@@ -26,6 +31,18 @@ const filtered = computed(() =>
         `${user.name} ${user.email}`
             .toLowerCase()
             .includes(search.value.toLowerCase()),
+    ),
+);
+const pagedUsers = computed(() =>
+    filtered.value.slice(
+        (userPage.value - 1) * userPageSize.value,
+        userPage.value * userPageSize.value,
+    ),
+);
+const pagedTickets = computed(() =>
+    tickets.value.slice(
+        (ticketPage.value - 1) * ticketPageSize.value,
+        ticketPage.value * ticketPageSize.value,
     ),
 );
 
@@ -138,7 +155,7 @@ onMounted(load);
             No open password tickets.
         </div>
         <div v-else class="ticket-list">
-            <article v-for="ticket in tickets" :key="ticket.id" class="device">
+            <article v-for="ticket in pagedTickets" :key="ticket.id" class="device">
                 <div>
                     <strong>{{ ticket.user?.name || ticket.email }}</strong
                     ><small
@@ -158,6 +175,13 @@ onMounted(load);
                 </button>
             </article>
         </div>
+        <TablePager
+            v-if="tickets.length"
+            v-model:page="ticketPage"
+            v-model:page-size="ticketPageSize"
+            :total="tickets.length"
+            label="tickets"
+        />
     </section>
 
     <section class="panel">
@@ -180,7 +204,7 @@ onMounted(load);
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="user in filtered" :key="user.id">
+                    <tr v-for="user in pagedUsers" :key="user.id">
                         <td data-label="User">
                             <strong>{{ user.name }}</strong
                             ><small v-if="user.must_change_password"
@@ -230,6 +254,12 @@ onMounted(load);
                 </tbody>
             </table>
         </div>
+        <TablePager
+            v-model:page="userPage"
+            v-model:page-size="userPageSize"
+            :total="filtered.length"
+            label="users"
+        />
     </section>
 
     <div v-if="eraseTarget" class="modal"><form class="modal-card" @submit.prevent="eraseAccount"><div class="panel-head"><div><h2>Permanently erase account</h2><small>{{ eraseTarget.name }} · {{ eraseTarget.email }}</small></div><button type="button" class="btn ghost" @click="eraseTarget = null">Close</button></div><p class="error">This cannot be undone. Personal profile and login data will be anonymized permanently. Historical orders and audit records remain for company accounting.</p><label>Reason<textarea v-model="eraseForm.reason" rows="3" minlength="10" required></textarea></label><label>Type the account email<input v-model="eraseForm.email_confirmation" type="email" required></label><label>Type PERMANENTLY ERASE<input v-model="eraseForm.confirmation_phrase" required></label><label>Your administrator password<input v-model="eraseForm.current_password" type="password" autocomplete="current-password" required></label><button class="btn danger full">Permanently erase this account</button></form></div>
