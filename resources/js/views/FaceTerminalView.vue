@@ -29,7 +29,9 @@ let modelsReady = false;
 let liveness = null;
 let missedFrames = 0;
 let detectedFaceCount = 0;
+let lastDetectionIssue = "No face detected. Center one face inside the frame.";
 let identityCandidate = null;
+const qualityCanvas = document.createElement("canvas");
 const lastSubmitted = new Map();
 const manifestLink = document.querySelector('link[rel="manifest"]');
 const originalManifest = manifestLink?.getAttribute("href");
@@ -41,13 +43,13 @@ const selectedEmployee = computed(() =>
         (employee) => employee.face_subject_id === selectedSubject.value,
     ),
 );
-const MATCH_DISTANCE = 0.46;
-const CONTINUING_DISTANCE = 0.48;
-const AMBIGUITY_MARGIN = 0.055;
+const MATCH_DISTANCE = 0.44;
+const CONTINUING_DISTANCE = 0.46;
+const AMBIGUITY_MARGIN = 0.065;
 const options = () =>
-    new faceapi.TinyFaceDetectorOptions({
-        inputSize: 416,
-        scoreThreshold: 0.7,
+    new faceapi.SsdMobilenetv1Options({
+        minConfidence: 0.52,
+        maxResults: 3,
     });
 
 function db() {
@@ -102,8 +104,8 @@ async function loadModels() {
     if (modelsReady) return;
     status.value = "Loading on-device recognition models…";
     await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri("/face-models"),
-        faceapi.nets.faceLandmark68TinyNet.loadFromUri("/face-models"),
+        faceapi.nets.ssdMobilenetv1.loadFromUri("/face-models"),
+        faceapi.nets.faceLandmark68Net.loadFromUri("/face-models"),
         faceapi.nets.faceRecognitionNet.loadFromUri("/face-models"),
     ]);
     modelsReady = true;
@@ -114,7 +116,7 @@ async function connect() {
     try {
         const data = await refreshEmployees(true);
         status.value =
-            "Device authenticated. Loading on-device recognition modelsâ€¦";
+            "Device authenticated. Loading on-device recognition models…";
         await loadModels();
         employees.value = data;
         localStorage.setItem("nenial-face-device-token", token.value);
@@ -195,18 +197,20 @@ async function startCamera() {
     try {
         stream = await navigator.mediaDevices.getUserMedia({
             video: {
-                facingMode: "user",
+                facingMode: { ideal: "user" },
                 width: { ideal: 1280 },
                 height: { ideal: 720 },
+                frameRate: { ideal: 24, max: 30 },
             },
             audio: false,
         });
         await nextTick();
         video.value.srcObject = stream;
         await video.value.play();
+        const settings = stream.getVideoTracks()[0]?.getSettings?.() || {};
         running.value = true;
         terminalMode.value = "preview";
-        status.value = "Camera ready. Choose enrollment or start attendance scanning.";
+        status.value = `Camera ready${settings.width ? ` at ${settings.width}×${settings.height}` : ""}. Choose enrollment or start attendance scanning.`;
         livenessUi.value = {
             visible: true,
             title: "Preview mode",
@@ -270,12 +274,122 @@ function pauseAttendance() {
     };
 }
 
+function frameMetrics(box = null) {
+    if (!video.value?.videoWidth || !video.value?.videoHeight) return null;
+    const width = 160;
+    const height = Math.max(
+        90,
+        Math.round((width * video.value.videoHeight) / video.value.videoWidth),
+    );
+    qualityCanvas.width = width;
+    qualityCanvas.height = height;
+    const context = qualityCanvas.getContext("2d", {
+        willReadFrequently: true,
+    });
+    context.drawImage(video.value, 0, 0, width, height);
+    const scaleX = width / video.value.videoWidth;
+    const scaleY = height / video.value.videoHeight;
+    const region = box
+        ? {
+              x: Math.max(0, Math.floor(box.x * scaleX)),
+              y: Math.max(0, Math.floor(box.y * scaleY)),
+              width: Math.max(
+                  1,
+                  Math.min(width, Math.ceil(box.width * scaleX)),
+              ),
+              height: Math.max(
+                  1,
+                  Math.min(height, Math.ceil(box.height * scaleY)),
+              ),
+          }
+        : { x: 0, y: 0, width, height };
+    region.width = Math.min(region.width, width - region.x);
+    region.height = Math.min(region.height, height - region.y);
+    const pixels = context.getImageData(
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+    ).data;
+    const luminance = [];
+    for (let index = 0; index < pixels.length; index += 4) {
+        luminance.push(
+            pixels[index] * 0.2126 +
+                pixels[index + 1] * 0.7152 +
+                pixels[index + 2] * 0.0722,
+        );
+    }
+    const mean =
+        luminance.reduce((sum, value) => sum + value, 0) /
+        Math.max(1, luminance.length);
+    const contrast = Math.sqrt(
+        luminance.reduce(
+            (sum, value) => sum + Math.pow(value - mean, 2),
+            0,
+        ) / Math.max(1, luminance.length),
+    );
+    let detail = 0;
+    let comparisons = 0;
+    for (let y = 0; y < region.height - 1; y++) {
+        for (let x = 0; x < region.width - 1; x++) {
+            const offset = y * region.width + x;
+            detail += Math.abs(luminance[offset] - luminance[offset + 1]);
+            detail += Math.abs(
+                luminance[offset] - luminance[offset + region.width],
+            );
+            comparisons += 2;
+        }
+    }
+    return {
+        brightness: mean,
+        contrast,
+        detail: detail / Math.max(1, comparisons),
+    };
+}
+
+function noFaceIssue() {
+    const metrics = frameMetrics();
+    if (metrics?.brightness < 28)
+        return "The camera image is too dark. Add soft light in front of your face.";
+    if (metrics?.brightness > 235)
+        return "The camera image is overexposed. Move away from direct light.";
+    return "No face detected. Center one face in the guide and move slightly closer.";
+}
+
+function faceQualityIssue(result, strict = false) {
+    const box = result.detection.box;
+    const widthRatio = box.width / video.value.videoWidth;
+    const heightRatio = box.height / video.value.videoHeight;
+    const centerX = (box.x + box.width / 2) / video.value.videoWidth;
+    const centerY = (box.y + box.height / 2) / video.value.videoHeight;
+    if (result.detection.score < (strict ? 0.66 : 0.56))
+        return "Face detected, but the image is unstable. Hold still and let the camera focus.";
+    if (widthRatio < (strict ? 0.17 : 0.12) || heightRatio < (strict ? 0.24 : 0.18))
+        return "Face detected, but it is too small. Move closer to the camera.";
+    if (centerX < 0.25 || centerX > 0.75 || centerY < 0.25 || centerY > 0.72)
+        return "Face detected. Center your full face inside the guide.";
+    const metrics = frameMetrics(box);
+    if (metrics?.brightness < 35)
+        return "Face detected, but it is too dark. Add soft front lighting.";
+    if (metrics?.brightness > 225)
+        return "Face detected, but it is overexposed. Avoid direct light behind or above you.";
+    if (strict && metrics?.contrast < 11)
+        return "Face detected, but facial detail is low. Use even front lighting and a plain background.";
+    if (strict && metrics?.detail < 2.6)
+        return "Face detected, but the image is blurred. Hold still and let the camera focus.";
+    return null;
+}
+
 async function descriptor() {
     const results = await faceapi
         .detectAllFaces(video.value, options())
-        .withFaceLandmarks(true)
+        .withFaceLandmarks()
         .withFaceDescriptors();
     detectedFaceCount = results.length;
+    if (!results.length) lastDetectionIssue = noFaceIssue();
+    else if (results.length > 1)
+        lastDetectionIssue = "Multiple faces detected. Only one person may be inside the frame.";
+    else lastDetectionIssue = faceQualityIssue(results[0], false) || "";
     return results.length === 1 ? results[0] : null;
 }
 
@@ -294,33 +408,112 @@ async function enroll() {
     }
     terminalMode.value = "enrollment";
     const samples = [];
-    const poses = [
-        "face forward",
-        "turn slightly left",
-        "turn slightly right",
-        "raise your chin slightly",
-        "lower your chin slightly",
+    const totalSamples = 7;
+    let firstSide = 0;
+    const stages = [
+        {
+            title: "Face forward",
+            instruction: "Look directly at the camera and hold still.",
+            count: 3,
+            accepts: (turn) => Math.abs(turn) <= 0.1,
+        },
+        {
+            title: "Turn to one side",
+            instruction: "Slowly turn toward either shoulder and hold.",
+            count: 2,
+            accepts: (turn) => Math.abs(turn) >= 0.1 && Math.abs(turn) <= 0.34,
+            rememberSide: true,
+        },
+        {
+            title: "Turn to the other side",
+            instruction: "Slowly turn toward the opposite shoulder and hold.",
+            count: 2,
+            accepts: (turn) =>
+                firstSide !== 0 &&
+                Math.sign(turn) !== firstSide &&
+                Math.abs(turn) >= 0.1 &&
+                Math.abs(turn) <= 0.34,
+        },
     ];
     try {
-        for (let index = 0; index < poses.length; index++) {
-            status.value = `Enrollment sample ${index + 1}/${poses.length}: ${poses[index]}.`;
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-            const result = await descriptor();
-            if (!result)
-                throw new Error(
-                    detectedFaceCount > 1
-                        ? "Only one person may be visible during enrollment."
-                        : "Face not clearly detected. Improve lighting and try again.",
-                );
-            if (
-                result.detection.score < 0.75 ||
-                result.detection.box.width < video.value.videoWidth * 0.18
-            )
-                throw new Error(
-                    "Move closer and use brighter, even front lighting.",
-                );
-            draw(result);
-            samples.push(Array.from(result.descriptor));
+        for (const stage of stages) {
+            const deadline = Date.now() + 20000;
+            let stableFrames = 0;
+            let capturedForStage = 0;
+            while (capturedForStage < stage.count) {
+                if (Date.now() > deadline)
+                    throw new Error(
+                        `${stage.title} could not be verified. Re-center your face and restart enrollment.`,
+                    );
+                const nextNumber = samples.length + 1;
+                status.value = `Enrollment ${nextNumber}/${totalSamples}: ${stage.instruction}`;
+                livenessUi.value = {
+                    visible: true,
+                    title: `${stage.title} · ${nextNumber}/${totalSamples}`,
+                    instruction:
+                        stableFrames > 0
+                            ? "Good. Keep that position briefly."
+                            : stage.instruction,
+                    progress: Math.round(
+                        (samples.length / totalSamples) * 100,
+                    ),
+                };
+                await new Promise((resolve) => setTimeout(resolve, 450));
+                const result = await descriptor();
+                if (!result) {
+                    stableFrames = 0;
+                    status.value = lastDetectionIssue;
+                    continue;
+                }
+                const qualityIssue = faceQualityIssue(result, true);
+                if (qualityIssue) {
+                    stableFrames = 0;
+                    status.value = qualityIssue;
+                    draw(result);
+                    continue;
+                }
+                const turn = headTurnRatio(result.landmarks);
+                if (!stage.accepts(turn)) {
+                    stableFrames = 0;
+                    status.value = stage.instruction;
+                    draw(result);
+                    continue;
+                }
+                stableFrames += 1;
+                draw(result);
+                if (stableFrames < 2) continue;
+
+                const sample = Array.from(result.descriptor);
+                if (
+                    samples.length &&
+                    faceapi.euclideanDistance(
+                        new Float32Array(samples[samples.length - 1]),
+                        result.descriptor,
+                    ) > 0.4
+                ) {
+                    stableFrames = 0;
+                    status.value =
+                        "The face changed between frames. Keep only the selected employee in view.";
+                    continue;
+                }
+                samples.push(sample);
+                capturedForStage += 1;
+                if (stage.rememberSide && firstSide === 0)
+                    firstSide = Math.sign(turn);
+                stableFrames = 0;
+                livenessUi.value = {
+                    visible: true,
+                    title: `Sample ${samples.length}/${totalSamples} captured`,
+                    instruction:
+                        capturedForStage < stage.count
+                            ? "Hold the same position for one more sample."
+                            : "Good. Follow the next position.",
+                    progress: Math.round(
+                        (samples.length / totalSamples) * 100,
+                    ),
+                };
+                await new Promise((resolve) => setTimeout(resolve, 700));
+            }
         }
         const withinProfile = samples.flatMap((sample, index) =>
             samples
@@ -332,9 +525,9 @@ async function enroll() {
                     ),
                 ),
         );
-        if (Math.max(...withinProfile) > 0.52)
+        if (Math.max(...withinProfile) > 0.48)
             throw new Error(
-                "The samples were inconsistent. Keep only one person in frame and repeat enrollment.",
+                "The enrollment samples were inconsistent. Keep only the selected employee in frame and repeat enrollment.",
             );
         for (const profile of enrolled.value.filter(
             (item) =>
@@ -350,7 +543,7 @@ async function enroll() {
                     ),
                 ),
             );
-            if (duplicateDistance < 0.38)
+            if (duplicateDistance < 0.4)
                 throw new Error(
                     `This face appears to already be enrolled as ${profile.employee_name}. Remove the incorrect enrollment first.`,
                 );
@@ -366,8 +559,9 @@ async function enroll() {
         livenessUi.value = {
             visible: true,
             title: "Enrollment complete",
-            instruction: "Attendance remains paused until Start attendance is selected.",
-            progress: 0,
+            instruction:
+                "Seven verified samples saved. Attendance remains paused until Start attendance is selected.",
+            progress: 100,
         };
         status.value = `${selectedEmployee.value.name} enrolled successfully. Attendance was not recorded.`;
     } catch (error) {
@@ -433,9 +627,12 @@ async function loop() {
                     : "Looking for a face",
                 instruction: multiple
                     ? "Only one employee may be inside the frame."
-                    : "Center your face and use even front lighting.",
+                    : lastDetectionIssue,
                 progress: 0,
             };
+            status.value = multiple
+                ? "Multiple faces detected. Attendance was not recorded."
+                : lastDetectionIssue;
         }
     } catch (error) {
         status.value = `Recognition paused: ${error.message}`;
@@ -482,7 +679,7 @@ async function recognize(result) {
         })
         .sort((a, b) => a.distance - b.distance);
     const match = ranked[0];
-    const requiredVotes = Math.min(2, match?.profile.descriptors.length || 2);
+    const requiredVotes = Math.min(3, match?.profile.descriptors.length || 3);
     const ambiguous =
         ranked[1] && ranked[1].distance - match.distance < AMBIGUITY_MARGIN;
     const continuingLiveness =
@@ -496,7 +693,7 @@ async function recognize(result) {
         ambiguous ||
         (!continuingLiveness &&
             (match.distance > MATCH_DISTANCE ||
-                match.best > 0.43 ||
+                match.best > 0.41 ||
                 match.votes < requiredVotes))
     ) {
         liveness = null;
@@ -510,7 +707,7 @@ async function recognize(result) {
                 ? "Cannot confirm identity"
                 : "Face not recognized",
             instruction: ambiguous
-                ? "Improve lighting and face the camera directly. Attendance was not recorded."
+                ? "Face the camera directly and make sure only one employee is visible. Attendance was not recorded."
                 : "Face forward, move slightly closer, and try again.",
             progress: 0,
         };
@@ -829,6 +1026,11 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                     <video ref="video" class="mirrored-camera" muted playsinline></video
                     ><canvas ref="canvas" class="mirrored-camera"></canvas>
                     <div
+                        v-if="running"
+                        class="face-position-guide"
+                        aria-hidden="true"
+                    ></div>
+                    <div
                         v-if="running && livenessUi.visible"
                         class="liveness-guide"
                         role="status"
@@ -902,10 +1104,10 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                             :disabled="busy || !selectedSubject"
                             @click="enroll"
                         >
-                            Capture five samples</button
+                            Start guided enrollment</button
                         ><small
                             >Obtain employee consent. Enrollment stores
-                            numerical descriptors only; photos are not stored. Attendance remains paused after enrollment.</small
+                            seven verified numerical descriptors across forward and side angles; photos are not stored. Allow about 15–30 seconds and follow each camera instruction. Attendance remains paused after enrollment.</small
                         >
                     </section>
                     <section v-if="lastResult" class="terminal-card success">
@@ -951,6 +1153,48 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
 <style scoped>
 .enrollment-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .mirrored-camera { transform: scaleX(-1); }
+.face-position-guide {
+    position: absolute;
+    z-index: 1;
+    width: min(42%, 320px);
+    aspect-ratio: 3 / 4;
+    border: 2px dashed rgba(255, 255, 255, 0.62);
+    border-radius: 48% 48% 44% 44%;
+    box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+}
+.liveness-guide {
+    position: absolute;
+    z-index: 3;
+    top: 18px;
+    left: 50%;
+    display: grid;
+    gap: 0.35rem;
+    width: min(520px, calc(100% - 32px));
+    padding: 12px 14px;
+    transform: translateX(-50%);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 12px;
+    color: #fff;
+    background: rgba(5, 31, 19, 0.84);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    text-align: center;
+}
+.liveness-guide span { color: #d5e8dc; font-size: 0.82rem; }
+.liveness-progress {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.2);
+}
+.liveness-progress i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #52d88d;
+    transition: width 0.25s ease;
+}
 .camera-controls {
     position: absolute;
     z-index: 4;

@@ -86,3 +86,25 @@ html,body,#app{overflow-x:clip}
     .pager-controls .btn{flex:1}
 }
 
+/* Dedicated cashier POS workspace. */
+.cashier-shell{min-height:100vh;background:#eef3f0}
+.cashier-topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:1.25rem;min-height:72px;padding:10px clamp(16px,2.5vw,36px);border-bottom:1px solid #cbdad1;color:#fff;background:linear-gradient(110deg,#092f1e,#125f3b);box-shadow:0 8px 24px rgba(7,42,25,.16)}
+.cashier-topbar .brand small{color:#bdd8c7}
+.cashier-session{display:flex;align-items:center;justify-content:flex-end;gap:.65rem}
+.cashier-session>span{display:grid;min-width:150px;margin-right:.35rem;text-align:right}
+.cashier-session small{color:#bdd8c7;font-size:.68rem}
+.cashier-session .btn{min-height:38px;color:#fff;border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.06)}
+.cashier-workspace{min-width:0;padding:clamp(14px,2vw,28px)}
+.cashier-workspace .page-header{margin-bottom:16px}
+.cashier-workspace .pos-layout{max-width:1800px}
+@media(min-width:1241px){
+    .cashier-shell .cashier-workspace .pos-layout{grid-template-columns:minmax(480px,.82fr) minmax(0,1.18fr)}
+}
+@media(max-width:700px){
+    .cashier-topbar{align-items:stretch;flex-direction:column}
+    .cashier-session{width:100%;justify-content:stretch}
+    .cashier-session>span{display:none}
+    .cashier-session .btn{flex:1}
+    .cashier-workspace{padding:12px}
+}
+

@@ -239,6 +239,7 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
     public function test_failed_otp_resend_does_not_replace_the_usable_code_or_start_a_new_cooldown(): void
     {
         Mail::fake();
+        config(['services.resend.key' => null]);
         $email = 'otp.delivery.failure@example.com';
         $this->postJson('/api/auth/register', [
             'name' => 'OTP Delivery Customer', 'email' => $email,
@@ -247,14 +248,26 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
 
         $otp = EmailVerificationOtp::where('user_id', User::where('email', $email)->value('id'))->firstOrFail();
         $otp->update(['sent_at' => now()->subSeconds(31)]);
-        $original = $otp->fresh()->only(['code_hash', 'attempts', 'expires_at', 'sent_at']);
+        $originalOtp = $otp->fresh();
+        $original = [
+            'code_hash' => $originalOtp->code_hash,
+            'attempts' => $originalOtp->attempts,
+            'expires_at' => $originalOtp->expires_at?->toISOString(),
+            'sent_at' => $originalOtp->sent_at?->toISOString(),
+        ];
 
-        Mail::shouldReceive('raw')->once()->andThrow(new RuntimeException('SMTP unavailable'));
+        Mail::shouldReceive('html')->once()->andThrow(new RuntimeException('SMTP unavailable'));
         $this->postJson('/api/auth/resend-otp', ['email' => $email])
             ->assertStatus(503)
-            ->assertJsonPath('message', 'Verification email could not be delivered. Please check the address and try again shortly.');
+            ->assertJsonPath('message', 'Verification email could not be delivered. Check the SMTP/API credentials in Vercel, then redeploy.');
 
-        $this->assertSame($original, $otp->fresh()->only(['code_hash', 'attempts', 'expires_at', 'sent_at']));
+        $currentOtp = $otp->fresh();
+        $this->assertSame($original, [
+            'code_hash' => $currentOtp->code_hash,
+            'attempts' => $currentOtp->attempts,
+            'expires_at' => $currentOtp->expires_at?->toISOString(),
+            'sent_at' => $currentOtp->sent_at?->toISOString(),
+        ]);
     }
 
     public function test_admin_can_permanently_erase_a_disabled_account(): void

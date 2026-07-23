@@ -216,16 +216,16 @@ docker compose -f docker-compose.local.yml logs -f sync
 
 ## Facial-recognition terminal setup
 
-Nenial includes a browser-based attendance terminal. Raw images are not stored. Numerical face descriptors stay in IndexedDB on the camera computer; Neon receives only the subject identifier, event ID, timestamp, and confidence.
+Nenial includes a browser-based attendance terminal. Raw images are not stored. Numerical face descriptors are shared through the application database so authorized online and store-local terminals use the same enrollment set. Attendance events contain the subject identifier, event ID, timestamp, and confidence.
 
 1. Assign each employee a unique **Face Subject ID** under Workforce.
 2. Under **Devices**, register a Facial device and copy its one-time token.
 3. On the store camera computer open `http://localhost:8080/face-terminal`. For a separate LAN device, use a trusted HTTPS reverse proxy because browsers do not allow camera access on ordinary HTTP LAN origins.
-4. Paste the token, start the camera, select an employee, and capture the three enrollment angles with their consent.
-5. During attendance, face matching happens locally and a blink is required before submission. Use consistent lighting and mount the camera around eye level.
-6. Use **Remove** under Local enrollments when consent is withdrawn or the employee leaves. Browser templates never reach the server.
+4. Paste the token, start the camera, select an employee, and complete the guided seven-sample enrollment with their consent. The terminal verifies three forward samples and two samples from each side; allow approximately 15–30 seconds.
+5. Select **Start attendance** only after enrollment is complete. Matching happens locally after the terminal confirms the same identity across several frames. Enrollment never records attendance automatically.
+6. Use **Remove** under Shared enrollments when consent is withdrawn or the employee leaves. The deletion synchronizes between the cloud and store-local server.
 
-The included blink check reduces simple photograph replay, but it is not equivalent to certified depth/IR anti-spoofing. For higher-security sites, use a commercial depth/IR facial terminal with the webhook below.
+The browser terminal uses ordinary RGB camera frames and is not equivalent to certified depth/IR anti-spoofing. For higher-security sites, use a commercial depth/IR facial terminal with the webhook below.
 
 ### Commercial terminal webhook
 
@@ -263,7 +263,7 @@ The webhook is idempotent by provider event ID and updates one attendance record
 - Google sign-in requires a Google Cloud OAuth Web client. Add the production domain under Authorized JavaScript origins, add the exact `https://your-domain/auth/google/callback` redirect URI, then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in Vercel. The OAuth flow is stateless for Vercel/serverless reliability. The login screen disables Google sign-in until those credentials are present. Google—not this repository—controls consent-screen publication and any verification review.
 - All online payments use PayMongo-hosted checkout; Nenial never receives card or wallet credentials. Configure `PAYMONGO_SECRET_KEY`, `PAYMONGO_WEBHOOK_SECRET`, and `PAYMONGO_PAYMENT_METHODS`, then register the HTTPS webhook endpoint `/api/payments/webhooks/paymongo`. Enable Cards, GCash, and Maya in the PayMongo dashboard, test with sandbox keys, and complete merchant activation before switching to live keys.
 - Online inventory is reserved atomically when an order is placed and deducted only when the customer confirms receipt. A successful gateway webhook records that funds were paid. Paid cancellations are deliberately blocked until staff completes a refund with the provider, preventing a local cancellation from silently leaving customer funds captured.
-- Facial matching occurs locally in the Nenial browser terminal or on a commercial vendor gateway. Browser templates stay on the terminal and are never synchronized to Neon.
+- Facial matching occurs locally in the Nenial browser terminal or on a commercial vendor gateway. Numerical descriptors synchronize through Nenial so online and store-local terminals share enrollments; raw photos are not stored.
 - Inventory screens synchronize every three seconds from their current server. The store-local worker refreshes cloud product totals and the latest inventory activity ledger every 30 seconds, so `localhost`, LAN devices, and Vercel show the same authoritative activity after synchronization. PostgreSQL remains authoritative, so simultaneous POS and online purchases are serialized by row locks even if a screen has not refreshed yet.
 
 ## Verification

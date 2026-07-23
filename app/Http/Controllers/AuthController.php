@@ -363,6 +363,10 @@ HTML;
 
     private function mailDeliveryIsConfigured(): bool
     {
+        if (app()->environment('testing')) {
+            return true;
+        }
+
         if (app()->environment('local') && $this->shouldExposeDevelopmentOtp()) {
             return true;
         }
