@@ -9,6 +9,7 @@ const auth = useAuthStore();
 const inventory = useInventoryStore();
 const message = ref("");
 const editing = ref(null);
+const removingId = ref(null);
 const showForm = ref(false);
 const search = ref("");
 const page = ref(1);
@@ -66,6 +67,23 @@ async function adjust(product) {
         await inventory.load();
     } catch (error) {
         message.value = error.response?.data?.message || "Adjustment failed.";
+    }
+}
+async function removeProduct(product) {
+    const stockNote = Number(product.stock_quantity) > 0
+        ? ` It currently has ${product.stock_quantity} ${product.unit} on hand.`
+        : "";
+    if (!confirm(`Remove "${product.name}" from Inventory?${stockNote}\n\nIt will no longer appear in the storefront or POS. Historical sales and inventory records will be retained.`)) return;
+
+    removingId.value = product.id;
+    try {
+        await axios.delete(`/api/products/${product.id}`);
+        message.value = `${product.name} was removed from Inventory.`;
+        await inventory.load();
+    } catch (error) {
+        message.value = error.response?.data?.message || "Unable to remove this product.";
+    } finally {
+        removingId.value = null;
     }
 }
 const visibleProducts = computed(() => {
@@ -177,6 +195,13 @@ const pagedProducts = computed(() =>
                                 Edit</button
                             ><button class="btn tiny" @click="adjust(product)">
                                 Adjust
+                            </button
+                            ><button
+                                class="btn tiny danger"
+                                :disabled="removingId === product.id"
+                                @click="removeProduct(product)"
+                            >
+                                {{ removingId === product.id ? "Removing…" : "Remove" }}
                             </button>
                         </div>
                     </td>

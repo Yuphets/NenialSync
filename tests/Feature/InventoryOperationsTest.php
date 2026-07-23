@@ -87,4 +87,34 @@ class InventoryOperationsTest extends TestCase
             'quantity_delta' => 12,
         ]);
     }
+
+    public function test_only_admin_can_remove_an_unreserved_product(): void
+    {
+        $product = Product::firstOrFail();
+        $assistant = User::where('role', 'assistant')->firstOrFail();
+        $admin = User::where('role', 'admin')->firstOrFail();
+
+        $this->actingAs($assistant)
+            ->deleteJson("/api/products/{$product->id}")
+            ->assertForbidden();
+
+        $this->actingAs($admin)
+            ->deleteJson("/api/products/{$product->id}")
+            ->assertNoContent();
+
+        $this->assertSoftDeleted('products', ['id' => $product->id]);
+    }
+
+    public function test_product_with_an_active_reservation_cannot_be_removed(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $product = Product::firstOrFail();
+        $product->update(['reserved_quantity' => 1]);
+
+        $this->actingAs($admin)
+            ->deleteJson("/api/products/{$product->id}")
+            ->assertUnprocessable();
+
+        $this->assertNotSoftDeleted('products', ['id' => $product->id]);
+    }
 }
