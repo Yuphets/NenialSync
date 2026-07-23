@@ -181,6 +181,7 @@ async function checkout() {
 </script>
 
 <template>
+    <div class="pos-page">
     <PageHeader
         title="POS Terminal"
         subtitle="Fast counter checkout with transaction-safe stock deduction"
@@ -373,9 +374,11 @@ async function checkout() {
             <p>Position the barcode inside the camera view.</p>
         </div>
     </div>
+    </div>
 </template>
 
 <style scoped>
+.pos-page { min-width: 0; }
 .pos-workstation {
     grid-template-columns: minmax(390px, .82fr) minmax(0, 1.28fr);
     align-items: stretch;
@@ -444,6 +447,128 @@ async function checkout() {
 .tender-grid button { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-weight: 750; }
 .tender-grid button.active { border-color: var(--brand); color: var(--brand); background: var(--soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .tender-note { color: var(--muted); line-height: 1.4; }
+@media (min-width: 1241px) {
+    :global(.cashier-workspace) .pos-page {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+    :global(.cashier-workspace) .pos-page > .page-header {
+        flex: 0 0 auto;
+        align-items: center;
+        width: 100%;
+        margin: 0 auto 10px;
+    }
+    :global(.cashier-workspace) .pos-page > .page-header h1 {
+        font-size: clamp(1.45rem, 2vw, 1.9rem);
+    }
+    :global(.cashier-workspace) .pos-page > .page-header p {
+        margin-top: 0.2rem;
+        font-size: 0.82rem;
+    }
+    :global(.cashier-workspace) .pos-page > .notice {
+        flex: 0 0 auto;
+        margin-bottom: 8px;
+        padding-block: 8px;
+    }
+    :global(.cashier-workspace) .pos-workstation {
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+    :global(.cashier-workspace) .product-library,
+    :global(.cashier-workspace) .sale-ticket {
+        height: 100%;
+        min-height: 0;
+        max-height: none;
+        margin-bottom: 0;
+        overflow: hidden;
+    }
+}
+@media (min-width: 1241px) and (max-height: 760px) {
+    :global(.cashier-workspace) .pos-panel-head {
+        min-height: 48px;
+        padding: 9px 12px;
+    }
+    :global(.cashier-workspace) .pos-scanner {
+        padding: 8px 10px 6px;
+    }
+    :global(.cashier-workspace) .pos-search {
+        margin: 0 10px 7px;
+    }
+    :global(.cashier-workspace) .pos-scanner input,
+    :global(.cashier-workspace) .pos-search input {
+        min-height: 36px;
+        padding-block: 0.45rem;
+    }
+    :global(.cashier-workspace) .category-strip {
+        padding: 0 10px 7px;
+    }
+    :global(.cashier-workspace) .category-strip button {
+        padding: 0.38rem 0.62rem;
+    }
+    :global(.cashier-workspace) .pos-keys {
+        grid-auto-rows: minmax(116px, auto);
+        gap: 7px;
+        padding: 9px;
+    }
+    :global(.cashier-workspace) .pos-keys button {
+        min-height: 116px;
+        padding: 10px;
+    }
+    :global(.cashier-workspace) .ticket-head {
+        min-height: 52px;
+        padding: 10px 16px;
+    }
+    :global(.cashier-workspace) .ticket-head h2 {
+        margin: 0.1rem 0;
+        font-size: 1rem;
+    }
+    :global(.cashier-workspace) .ticket-column-head {
+        padding-block: 7px;
+    }
+    :global(.cashier-workspace) .ticket-lines {
+        min-height: 58px;
+    }
+    :global(.cashier-workspace) .ticket-line {
+        padding-block: 8px;
+    }
+    :global(.cashier-workspace) .ticket-empty {
+        min-height: 90px;
+        padding: 16px;
+    }
+    :global(.cashier-workspace) .ticket-summary {
+        gap: 0.25rem;
+        padding: 8px 0;
+    }
+    :global(.cashier-workspace) .ticket-summary span,
+    :global(.cashier-workspace) .ticket-discount {
+        font-size: 0.72rem;
+    }
+    :global(.cashier-workspace) .ticket-discount input {
+        width: 70px;
+        min-height: 30px;
+    }
+    :global(.cashier-workspace) .ticket-total {
+        padding: 11px 14px;
+        font-size: 1rem;
+    }
+    :global(.cashier-workspace) .tender-section {
+        gap: 0.35rem;
+        margin-top: 8px;
+    }
+    :global(.cashier-workspace) .tender-grid button {
+        min-height: 32px;
+    }
+    :global(.cashier-workspace) .checkout {
+        min-height: 38px;
+        margin-top: 8px;
+        margin-bottom: 10px;
+    }
+}
 @media (max-width: 1240px) {
     .pos-workstation { grid-template-columns: minmax(0, 1fr); }
     .product-library,

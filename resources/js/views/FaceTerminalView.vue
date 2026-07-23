@@ -1247,6 +1247,8 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
     }
     .face-terminal.is-connected > header {
         flex: 0 0 auto;
+        justify-content: space-between;
+        width: 100%;
         margin-bottom: 10px;
     }
     .face-terminal.is-connected > header .eyebrow { margin: 0; }
