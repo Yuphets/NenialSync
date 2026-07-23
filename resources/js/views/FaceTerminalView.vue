@@ -991,7 +991,7 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
 </script>
 
 <template>
-    <main class="face-terminal">
+    <main class="face-terminal" :class="{ 'is-connected': connected }">
         <header>
             <div>
                 <span class="eyebrow">Nenial Attendance</span>
@@ -1041,7 +1041,7 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                         <div
                             class="liveness-progress"
                             role="progressbar"
-                            aria-label="Liveness progress"
+                            aria-label="Recognition progress"
                             :aria-valuenow="livenessUi.progress"
                             aria-valuemin="0"
                             aria-valuemax="100"
@@ -1105,10 +1105,13 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                             @click="enroll"
                         >
                             Start guided enrollment</button
-                        ><small
-                            >Obtain employee consent. Enrollment stores
-                            seven verified numerical descriptors across forward and side angles; photos are not stored. Allow about 15–30 seconds and follow each camera instruction. Attendance remains paused after enrollment.</small
                         >
+                        <ol class="enrollment-steps">
+                            <li>Select an employee and obtain consent.</li>
+                            <li>Follow the forward and side-angle prompts for 15–30 seconds.</li>
+                            <li>After enrollment, select <b>Start attendance</b> when ready.</li>
+                        </ol>
+                        <small>Seven numerical face descriptors are stored; photos are not stored.</small>
                     </section>
                     <section v-if="lastResult" class="terminal-card success">
                         <h2>Attendance recorded</h2>
@@ -1152,6 +1155,15 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
 </template>
 <style scoped>
 .enrollment-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.enrollment-steps {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+    padding-left: 1.15rem;
+    color: #526159;
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
 .mirrored-camera { transform: scaleX(-1); }
 .face-position-guide {
     position: absolute;
@@ -1168,21 +1180,39 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
     z-index: 3;
     top: 18px;
     left: 50%;
+    right: auto;
+    bottom: auto;
     display: grid;
-    gap: 0.35rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.3rem 0.75rem;
     width: min(520px, calc(100% - 32px));
+    height: max-content;
+    min-height: 0;
+    max-height: 120px;
     padding: 12px 14px;
     transform: translateX(-50%);
+    align-self: start;
+    justify-self: center;
+    align-content: start;
     border: 1px solid rgba(255, 255, 255, 0.22);
     border-radius: 12px;
     color: #fff;
-    background: rgba(5, 31, 19, 0.84);
+    background: rgba(5, 31, 19, 0.92);
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
-    backdrop-filter: blur(10px);
-    text-align: center;
+    text-align: left;
+    pointer-events: none;
 }
-.liveness-guide span { color: #d5e8dc; font-size: 0.82rem; }
+.liveness-guide strong { white-space: nowrap; }
+.liveness-guide span {
+    min-width: 0;
+    overflow: hidden;
+    color: #d5e8dc;
+    font-size: 0.82rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .liveness-progress {
+    grid-column: 1 / -1;
     height: 6px;
     overflow: hidden;
     border-radius: 999px;
@@ -1205,4 +1235,74 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
     gap: 0.6rem;
 }
 .camera-stage .camera-controls .btn { position: static; }
+
+@media (min-width: 901px) {
+    .face-terminal.is-connected {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        min-height: 560px;
+        overflow: hidden;
+        padding: 12px clamp(14px, 2vw, 28px);
+    }
+    .face-terminal.is-connected > header {
+        flex: 0 0 auto;
+        margin-bottom: 10px;
+    }
+    .face-terminal.is-connected > header .eyebrow { margin: 0; }
+    .face-terminal.is-connected > header h1 {
+        margin: 0.15rem 0 0;
+        font-size: clamp(1.55rem, 2.5vw, 2.35rem);
+    }
+    .face-terminal.is-connected .terminal-status {
+        flex: 0 0 auto;
+        margin-bottom: 10px;
+        padding: 9px 13px;
+    }
+    .face-terminal.is-connected .terminal-grid {
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .face-terminal.is-connected .camera-stage {
+        height: 100%;
+        min-height: 0;
+    }
+    .face-terminal.is-connected .terminal-grid > aside {
+        min-height: 0;
+        padding-right: 4px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+    }
+    .face-terminal.is-connected .terminal-card {
+        gap: 10px;
+        padding: 16px;
+    }
+}
+
+@media (max-height: 680px) and (min-width: 901px) {
+    .face-terminal.is-connected > header .eyebrow { display: none; }
+    .face-terminal.is-connected > header h1 { font-size: 1.55rem; }
+    .face-terminal.is-connected > header .btn {
+        min-height: 36px;
+        padding: 0.5rem 0.8rem;
+    }
+    .face-terminal.is-connected .terminal-card {
+        gap: 8px;
+        padding: 13px 14px;
+    }
+    .face-terminal.is-connected .camera-controls { bottom: 12px; }
+}
+
+@media (max-width: 900px) {
+    .liveness-guide {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+    .liveness-guide strong,
+    .liveness-guide span { white-space: normal; }
+    .liveness-progress { grid-column: 1; }
+}
 </style>
