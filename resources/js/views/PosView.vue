@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import axios from "axios";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import PageHeader from "../components/PageHeader.vue";
 import { useAuthStore } from "../stores/auth";
 import { useInventoryStore } from "../stores/inventory";
@@ -15,13 +14,9 @@ const selectedCategory = ref("All");
 const cart = ref([]);
 const message = ref("");
 const busy = ref(false);
-const showCamera = ref(false);
-const video = ref(null);
 const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
 const mobilePanel = ref("products");
-const reader = new BrowserMultiFormatReader();
-let scannerControls = null;
 let checkoutKey = crypto.randomUUID();
 
 const categories = computed(() => [
@@ -94,7 +89,6 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
     inventory.stop();
-    scannerControls?.stop();
 });
 
 function add(product) {
@@ -125,34 +119,6 @@ function clearTicket() {
     if (!cart.value.length || confirm("Clear every item from this sale?")) {
         cart.value = [];
         saleDiscountPercent.value = 0;
-    }
-}
-
-function closeCamera() {
-    scannerControls?.stop();
-    scannerControls = null;
-    showCamera.value = false;
-}
-
-async function camera() {
-    showCamera.value = true;
-    await new Promise((resolve) => setTimeout(resolve));
-    try {
-        scannerControls = await reader.decodeFromVideoDevice(
-            undefined,
-            video.value,
-            (result) => {
-                if (result) {
-                    barcode.value = result.getText();
-                    closeCamera();
-                    scan();
-                }
-            },
-        );
-    } catch {
-        closeCamera();
-        message.value =
-            "Camera access failed. Use a USB scanner or grant camera permission.";
     }
 }
 
@@ -229,7 +195,6 @@ async function checkout() {
                         @keyup.enter="scan"
                 /></label>
                 <button class="btn primary" @click="scan">Add item</button>
-                <button class="btn" @click="camera">Camera</button>
             </div>
             <label class="pos-search"
                 >Find a product<input
@@ -387,16 +352,6 @@ async function checkout() {
             </button>
         </section>
     </div>
-    <div v-if="showCamera" class="modal">
-        <div class="modal-card">
-            <div class="panel-head">
-                <h2>Camera barcode scanner</h2>
-                <button class="btn ghost" @click="closeCamera">Close</button>
-            </div>
-            <video ref="video"></video>
-            <p>Position the barcode inside the camera view.</p>
-        </div>
-    </div>
     </div>
 </template>
 
@@ -415,7 +370,7 @@ async function checkout() {
 .product-library { display: flex; flex-direction: column; }
 .pos-panel-head h2 { margin: 0 0 .2rem; }
 .register-state { padding: .35rem .65rem; border-radius: 999px; color: var(--brand); background: var(--soft); font-size: .72rem; font-weight: 800; }
-.pos-scanner { grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; padding-bottom: 8px; }
+.pos-scanner { grid-template-columns: minmax(0, 1fr) auto; align-items: end; padding-bottom: 8px; }
 .scan-field { min-width: 0; }
 .pos-scanner .btn { min-width: 88px; padding-inline: .75rem; white-space: nowrap; }
 .pos-search { margin: 0 12px 10px; }
