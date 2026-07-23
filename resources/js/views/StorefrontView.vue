@@ -14,6 +14,19 @@ const notice = ref('');
 const paying = ref(false);
 const paymentProvider = 'paymongo';
 const categories = ['All', 'Materials', 'Aggregates', 'Tools', 'Safety', 'Finishing'];
+const productArtwork = {
+    'CON-001': '/media/portland-cement-40kg.png',
+    'CON-002': '/media/steel-bar.jpg',
+    'CON-003': '/media/plywood.png',
+    'AGG-001': '/media/washed-sand.webp',
+    'AGG-002': '/media/crushed-stones.webp',
+    'AGG-003': '/media/filling-sand.avif',
+    'CON-005': '/media/safety-helmet-with-chin-strap.png',
+    'CON-006': '/media/masonry-tool-set.png',
+    'CON-007': '/media/safety-goggles.png',
+    'CON-008': '/media/work-gloves-leather.png',
+    'CON-009': '/media/power-drill-18v.png',
+};
 let checkoutKey = null;
 
 watch(cart, value => localStorage.setItem('nenial-cart', JSON.stringify(value)), { deep: true });
@@ -39,6 +52,12 @@ function add(product) {
     item ? item.quantity++ : cart.value.push({ ...product, quantity: 1 });
     checkoutKey = null;
     notice.value = `${product.name} added.`;
+}
+
+function productImage(product) {
+    const configuredImage = String(product.image_url || '').trim();
+    if (configuredImage && !configuredImage.endsWith('/Background.jpg')) return configuredImage;
+    return productArtwork[product.sku] || configuredImage || '/media/Background.jpg';
 }
 
 async function checkout() {
@@ -70,7 +89,7 @@ async function checkout() {
             </div>
         </header>
         <section class="store-hero"><div><span class="eyebrow">Construction supply, connected</span><h1>Materials in stock. Operations in sync.</h1><p>Shop live inventory with protected payment and delivery confirmation.</p></div></section>
-        <main id="catalog" class="catalog"><div class="section-title"><div><span class="eyebrow">{{ category }} catalog</span><h2>Available products</h2></div><strong>{{ products.length }} live SKUs</strong></div><p v-if="notice" class="notice">{{ notice }}</p><div v-if="loading" class="empty">Loading current inventory…</div><div class="product-grid"><article v-for="product in visible" :key="product.id" class="product-card"><div class="product-image"><img :src="product.image_url || '/media/Background.jpg'" :alt="product.name"></div><span class="tag">{{ product.category }}</span><h3>{{ product.name }}</h3><p>{{ product.supplier }} · {{ product.sku }}</p><div class="product-bottom"><strong>₱{{ Number(product.price).toLocaleString() }}</strong><small :class="{ low: product.is_low_stock }">{{ product.available_quantity }} {{ product.unit }}</small></div><button class="btn primary full" :disabled="product.available_quantity < 1" @click="add(product)">{{ product.available_quantity ? 'Add to cart' : 'Out of stock' }}</button></article></div></main>
+        <main id="catalog" class="catalog"><div class="section-title"><div><span class="eyebrow">{{ category }} catalog</span><h2>Available products</h2></div><strong>{{ products.length }} live SKUs</strong></div><p v-if="notice" class="notice">{{ notice }}</p><div v-if="loading" class="empty">Loading current inventory…</div><div class="product-grid"><article v-for="product in visible" :key="product.id" class="product-card"><div class="product-image"><img :src="productImage(product)" :alt="product.name"></div><span class="tag">{{ product.category }}</span><h3>{{ product.name }}</h3><p>{{ product.supplier }} · {{ product.sku }}</p><div class="product-bottom"><strong>₱{{ Number(product.price).toLocaleString() }}</strong><small :class="{ low: product.is_low_stock }">{{ product.available_quantity }} {{ product.unit }}</small></div><button class="btn primary full" :disabled="product.available_quantity < 1" @click="add(product)">{{ product.available_quantity ? 'Add to cart' : 'Out of stock' }}</button></article></div></main>
         <aside v-if="cart.length" class="cart-dock"><div class="cart-dock-summary"><span class="cart-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 4h2l2.3 10.1a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H7M10 20a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm9 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/></svg></span><div><strong>{{ itemCount }} items</strong><span>₱{{ total.toLocaleString(undefined, { maximumFractionDigits: 2 }) }}</span></div></div><div class="payment-choice" aria-label="Payment provider"><span>Secure payment</span><strong>PayMongo</strong><small>Card, GCash or Maya</small></div><button class="btn primary" :disabled="paying" @click="checkout">{{ paying ? 'Opening PayMongo…' : 'Pay securely' }}</button></aside>
     </div>
 </template>
@@ -88,13 +107,20 @@ async function checkout() {
 }
 :global(.store-hero) {
     padding-top: max(132px, calc(70px + env(safe-area-inset-top))) !important;
+    background: linear-gradient(90deg, rgba(4, 27, 17, .95), rgba(4, 27, 17, .45)), url('/media/construction-supply-bg.png') center / cover no-repeat !important;
+    background-attachment: fixed !important;
 }
+:global(.store-hero h1) { text-shadow: 0 3px 18px rgba(0, 0, 0, .52); }
+:global(.store-hero p) { text-shadow: 0 2px 8px rgba(0, 0, 0, .42); }
 :global(.store-hero),
 :global(.catalog) { scroll-margin-top: 92px; }
 .payment-choice { display: grid; min-width: 190px; gap: 1px; }
 .payment-choice small { color: var(--muted, #607369); }
 @media (max-width: 700px) {
-    :global(.store-hero) { padding-top: 190px !important; }
+    :global(.store-hero) {
+        padding-top: 190px !important;
+        background-attachment: scroll !important;
+    }
     .cart-dock { right: 10px; bottom: 10px; left: 10px; align-items: stretch; flex-direction: column; gap: 9px; }
     .payment-choice { min-width: 0; }
     .cart-dock .btn { width: 100%; }
