@@ -19,6 +19,7 @@ const showCamera = ref(false);
 const video = ref(null);
 const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
+const mobilePanel = ref("products");
 const reader = new BrowserMultiFormatReader();
 let scannerControls = null;
 let checkoutKey = crypto.randomUUID();
@@ -106,6 +107,8 @@ function add(product) {
     item ? item.quantity++ : cart.value.push({ ...product, quantity: 1 });
     barcode.value = "";
     message.value = "";
+    if (window.matchMedia("(max-width: 1240px)").matches)
+        mobilePanel.value = "cart";
 }
 
 function scan() {
@@ -169,6 +172,7 @@ async function checkout() {
         cart.value = [];
         saleDiscountPercent.value = 0;
         paymentMethod.value = "cash";
+        mobilePanel.value = "products";
         checkoutKey = crypto.randomUUID();
         await inventory.load();
     } catch (error) {
@@ -190,7 +194,24 @@ async function checkout() {
         ><span class="live">● Inventory live</span></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
-    <div class="pos-layout pos-workstation">
+    <nav class="pos-mobile-tabs" aria-label="POS workspace">
+        <button
+            :class="{ active: mobilePanel === 'products' }"
+            @click="mobilePanel = 'products'"
+        >
+            Products
+        </button>
+        <button
+            :class="{ active: mobilePanel === 'cart' }"
+            @click="mobilePanel = 'cart'"
+        >
+            Cart <b>{{ cartQuantity }}</b>
+        </button>
+    </nav>
+    <div
+        class="pos-layout pos-workstation"
+        :class="`mobile-panel-${mobilePanel}`"
+    >
         <section class="panel compact-products product-library">
             <div class="panel-head pos-panel-head">
                 <div>
@@ -381,6 +402,7 @@ async function checkout() {
 
 <style scoped>
 .pos-page { min-width: 0; }
+.pos-mobile-tabs { display: none; }
 .pos-workstation {
     grid-template-columns: minmax(390px, .82fr) minmax(0, 1.28fr);
     align-items: stretch;
@@ -458,17 +480,7 @@ async function checkout() {
         overflow: hidden;
     }
     .pos-page.cashier-pos > .page-header {
-        flex: 0 0 auto;
-        align-items: center;
-        width: 100%;
-        margin: 0 auto 10px;
-    }
-    .pos-page.cashier-pos > .page-header h1 {
-        font-size: clamp(1.45rem, 2vw, 1.9rem);
-    }
-    .pos-page.cashier-pos > .page-header p {
-        margin-top: 0.2rem;
-        font-size: 0.82rem;
+        display: none;
     }
     .pos-page.cashier-pos > .notice {
         flex: 0 0 auto;
@@ -488,6 +500,45 @@ async function checkout() {
         max-height: none;
         margin-bottom: 0;
         overflow: hidden;
+    }
+    .cashier-pos .ticket-lines {
+        min-height: 150px;
+    }
+    .cashier-pos .ticket-summary {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.35rem 1rem;
+        margin-inline: 14px;
+        padding: 9px 0;
+    }
+    .cashier-pos .ticket-summary > span,
+    .cashier-pos .ticket-discount {
+        min-width: 0;
+        font-size: 0.72rem;
+    }
+    .cashier-pos .ticket-summary > span {
+        gap: 0.5rem;
+    }
+    .cashier-pos .ticket-summary b {
+        white-space: nowrap;
+    }
+    .cashier-pos .ticket-total {
+        margin-inline: 14px;
+        padding: 11px 14px;
+    }
+    .cashier-pos .tender-section {
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        margin: 9px 14px 0;
+    }
+    .cashier-pos .tender-section > span {
+        margin-right: 0.4rem;
+    }
+    .cashier-pos .tender-note {
+        grid-column: 1 / -1;
+    }
+    .cashier-pos .checkout {
+        width: calc(100% - 28px);
+        margin-inline: 14px;
     }
 }
 @media (min-width: 1241px) and (max-height: 760px) {
@@ -543,7 +594,7 @@ async function checkout() {
         padding: 16px;
     }
     .cashier-pos .ticket-summary {
-        gap: 0.25rem;
+        gap: 0.3rem 0.75rem;
         padding: 8px 0;
     }
     .cashier-pos .ticket-summary span,
@@ -572,12 +623,52 @@ async function checkout() {
     }
 }
 @media (max-width: 1240px) {
+    .pos-mobile-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin: 0 auto 10px;
+        padding: 5px;
+        width: min(520px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: var(--shadow);
+    }
+    .pos-mobile-tabs button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 8px;
+        color: var(--muted);
+        background: transparent;
+        font-weight: 800;
+    }
+    .pos-mobile-tabs button.active {
+        color: #fff;
+        background: var(--brand);
+    }
+    .pos-mobile-tabs b {
+        display: inline-grid;
+        place-items: center;
+        min-width: 22px;
+        height: 22px;
+        margin-left: 0.3rem;
+        border-radius: 999px;
+        color: var(--dark);
+        background: #fff;
+        font-size: 0.72rem;
+    }
     .pos-workstation { grid-template-columns: minmax(0, 1fr); }
     .product-library,
     .sale-ticket { min-height: 0; }
     .product-library { max-height: min(680px, 78dvh); }
     .sale-ticket { min-height: 620px; }
     .pos-keys { grid-template-columns: repeat(3,minmax(0,1fr)); max-height: 430px; }
+    .mobile-panel-products .sale-ticket,
+    .mobile-panel-cart .product-library { display: none; }
+    .mobile-panel-cart .sale-ticket {
+        min-height: min(680px, calc(100dvh - 190px));
+    }
 }
 @media (max-width: 900px) {
     .pos-keys { grid-template-columns: repeat(2,minmax(0,1fr)); }
