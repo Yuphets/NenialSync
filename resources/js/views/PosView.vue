@@ -18,6 +18,12 @@ const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
 const mobilePanel = ref("products");
 let checkoutKey = crypto.randomUUID();
+let scannerBuffer = "";
+let scannerStartedAt = 0;
+let scannerLastKeyAt = 0;
+let scannerTimer = null;
+const SCANNER_MAX_KEY_GAP_MS = 80;
+const SCANNER_IDLE_SUBMIT_MS = 120;
 
 const categories = computed(() => [
     "All",
@@ -86,9 +92,12 @@ const money = (value) =>
 onMounted(async () => {
     await inventory.load();
     inventory.start();
+    document.addEventListener("keydown", captureScannerKey, true);
 });
 onBeforeUnmount(() => {
     inventory.stop();
+    document.removeEventListener("keydown", captureScannerKey, true);
+    clearTimeout(scannerTimer);
 });
 
 function add(product) {
@@ -96,23 +105,69 @@ function add(product) {
     const quantity = (item?.quantity || 0) + 1;
     if (quantity > product.available_quantity) {
         message.value = "Insufficient available stock.";
-        return;
+        return false;
     }
     item ? item.quantity++ : cart.value.push({ ...product, quantity: 1 });
     barcode.value = "";
     message.value = "";
     if (window.matchMedia("(max-width: 1240px)").matches)
         mobilePanel.value = "cart";
+    return true;
 }
 
-function scan() {
-    const code = barcode.value.trim();
+function scan(scannedCode = barcode.value) {
+    const code = String(scannedCode || "").trim();
+    if (!code) return;
     const product = inventory.products.find(
         (item) =>
             item.barcode === code ||
             item.sku.toLowerCase() === code.toLowerCase(),
     );
-    product ? add(product) : (message.value = "Barcode or SKU not found.");
+    if (product) {
+        if (add(product)) message.value = `${product.name} scanned and added.`;
+    } else {
+        barcode.value = code;
+        message.value = `Barcode or SKU "${code}" was not found.`;
+    }
+}
+
+function captureScannerKey(event) {
+    if (event.ctrlKey || event.altKey || event.metaKey || event.isComposing || event.repeat) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
+
+    if ((event.key === "Enter" || event.key === "Tab") && scannerBuffer) {
+        event.preventDefault();
+        submitScannerBuffer();
+        return;
+    }
+    if (event.key.length !== 1) return;
+
+    const now = performance.now();
+    if (scannerLastKeyAt && now - scannerLastKeyAt > SCANNER_MAX_KEY_GAP_MS) resetScannerBuffer();
+    if (!scannerBuffer) scannerStartedAt = now;
+    scannerBuffer += event.key;
+    scannerLastKeyAt = now;
+    clearTimeout(scannerTimer);
+    scannerTimer = setTimeout(submitScannerBuffer, SCANNER_IDLE_SUBMIT_MS);
+}
+
+function submitScannerBuffer() {
+    clearTimeout(scannerTimer);
+    const code = scannerBuffer.trim();
+    const duration = scannerLastKeyAt - scannerStartedAt;
+    const averageGap = code.length > 1 ? duration / (code.length - 1) : Infinity;
+    resetScannerBuffer();
+    if (code.length < 3 || averageGap > SCANNER_MAX_KEY_GAP_MS) return;
+    barcode.value = code;
+    scan(code);
+}
+
+function resetScannerBuffer() {
+    clearTimeout(scannerTimer);
+    scannerBuffer = "";
+    scannerStartedAt = 0;
+    scannerLastKeyAt = 0;
 }
 
 function clearTicket() {
@@ -188,13 +243,13 @@ async function checkout() {
             </div>
             <div class="scanner pos-scanner">
                 <label class="scan-field"
-                    >Barcode or SKU<input
+                    ><span class="scan-label-head"><span>Barcode or SKU</span><small>Scanner ready · scan anytime</small></span><input
                         v-model="barcode"
                         autofocus
                         placeholder="Scan or type product code"
-                        @keyup.enter="scan"
+                        @keyup.enter="scan()"
                 /></label>
-                <button class="btn primary" @click="scan">Add item</button>
+                <button class="btn primary" @click="scan()">Add item</button>
             </div>
             <label class="pos-search"
                 >Find a product<input
@@ -372,6 +427,8 @@ async function checkout() {
 .register-state { padding: .35rem .65rem; border-radius: 999px; color: var(--brand); background: var(--soft); font-size: .72rem; font-weight: 800; }
 .pos-scanner { grid-template-columns: minmax(0, 1fr) auto; align-items: end; padding-bottom: 8px; }
 .scan-field { min-width: 0; }
+.scan-label-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.scan-label-head small { color: var(--brand); font-size: .68rem; font-weight: 800; }
 .pos-scanner .btn { min-width: 88px; padding-inline: .75rem; white-space: nowrap; }
 .pos-search { margin: 0 12px 10px; }
 .category-strip { display: flex; gap: .4rem; padding: 0 12px 10px; overflow-x: auto; }
