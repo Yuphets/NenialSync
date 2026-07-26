@@ -4,6 +4,7 @@ import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
 import TablePager from "../components/TablePager.vue";
 import { useAuthStore } from "../stores/auth";
+import { downloadPayrollWorkbook } from "../utils/payrollWorkbook";
 
 const auth = useAuthStore();
 const tab = ref("payroll");
@@ -225,16 +226,13 @@ async function run() {
 async function downloadPayroll() {
     exporting.value = true;
     try {
-        const response = await axios.get("/api/payroll/export", {
-            params: period(),
-            responseType: "blob",
-        });
-        const url = URL.createObjectURL(response.data);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `nenial-payroll-${period().period_end}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
+        await loadPayroll();
+        await downloadPayrollWorkbook(preview.value, period());
+        message.value = "Payroll Excel workbook downloaded.";
+    } catch (error) {
+        console.error("Payroll workbook export failed", error);
+        message.value =
+            "Unable to prepare the payroll workbook. Please try again.";
     } finally {
         exporting.value = false;
     }
@@ -300,7 +298,7 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                     @click="downloadPayroll"
                 >
                     {{
-                        exporting ? "Preparing…" : "Download payroll CSV"
+                        exporting ? "Preparing…" : "Download payroll Excel"
                     }}</button
                 ><button class="btn primary" @click="run">
                     Finalize payroll run
