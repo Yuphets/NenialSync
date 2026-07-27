@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import axios from 'axios';
 import PageHeader from '../components/PageHeader.vue';
 import { useAuthStore } from '../stores/auth';
@@ -11,6 +11,19 @@ const syncMessage = ref('');
 const showPasswords = ref(false);
 const sync = ref(null);
 const syncing = ref(false);
+const maintenance = ref(null);
+const maintenanceBusy = ref(false);
+const maintenanceMessage = ref('');
+const showMaintenanceDialog = ref(false);
+const showMaintenancePassword = ref(false);
+const maintenanceDialog = ref(null);
+const maintenanceLaunch = ref(null);
+const maintenanceForm = reactive({
+    enabled: false,
+    message: 'We are currently performing scheduled maintenance. Please check back shortly.',
+    current_password: '',
+    confirmation: '',
+});
 
 async function save() {
     try {
@@ -45,7 +58,96 @@ async function runSync() {
     }
 }
 
-onMounted(loadSync);
+async function loadMaintenance() {
+    if (auth.role !== 'admin') return;
+    try {
+        maintenance.value = (await axios.get('/api/system/status')).data;
+    } catch {
+        maintenance.value = null;
+    }
+}
+
+function maintenanceChanged(event) {
+    maintenance.value = event.detail;
+}
+
+function openMaintenanceDialog(enabled) {
+    maintenanceMessage.value = '';
+    showMaintenancePassword.value = false;
+    Object.assign(maintenanceForm, {
+        enabled,
+        message: maintenance.value?.message || 'We are currently performing scheduled maintenance. Please check back shortly.',
+        current_password: '',
+        confirmation: '',
+    });
+    showMaintenanceDialog.value = true;
+    nextTick(() => {
+        const initialControl = maintenanceDialog.value?.querySelector(
+            enabled ? 'textarea' : 'input[autocomplete="current-password"]',
+        );
+        initialControl?.focus();
+    });
+}
+
+function closeMaintenanceDialog(force = false) {
+    if (maintenanceBusy.value && !force) return;
+    showMaintenanceDialog.value = false;
+    showMaintenancePassword.value = false;
+    nextTick(() => maintenanceLaunch.value?.focus());
+}
+
+function handleMaintenanceDialogKeydown(event) {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMaintenanceDialog();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = [...maintenanceDialog.value.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href]',
+    )].filter((element) => element.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+async function saveMaintenance() {
+    maintenanceBusy.value = true;
+    maintenanceMessage.value = '';
+    try {
+        const { data } = await axios.put('/api/admin/maintenance', maintenanceForm);
+        maintenance.value = data.maintenance;
+        maintenanceMessage.value = data.message;
+        window.dispatchEvent(new CustomEvent('nenial:maintenance-changed', {
+            detail: data.maintenance,
+        }));
+        closeMaintenanceDialog(true);
+    } catch (error) {
+        maintenanceMessage.value =
+            error.response?.data?.message ||
+            Object.values(error.response?.data?.errors || {})[0]?.[0] ||
+            'Unable to change maintenance mode.';
+    } finally {
+        maintenanceBusy.value = false;
+    }
+}
+
+onMounted(() => {
+    window.addEventListener('nenial:maintenance-changed', maintenanceChanged);
+    return Promise.all([loadSync(), loadMaintenance()]);
+});
+onBeforeUnmount(() => {
+    window.removeEventListener('nenial:maintenance-changed', maintenanceChanged);
+});
 </script>
 
 <template>
@@ -68,6 +170,34 @@ onMounted(loadSync);
         </form>
     </div>
 
+    <section v-if="auth.role === 'admin' && maintenance" class="panel maintenance-control" :class="{ active: maintenance.enabled }">
+        <div class="panel-head">
+            <div>
+                <span class="maintenance-kicker">Website availability</span>
+                <h2>Maintenance mode</h2>
+                <small>Temporarily block customer and staff access while keeping administrator recovery, synchronization, payment webhooks, and registered attendance devices available.</small>
+            </div>
+            <span class="tag" :class="{ warn: maintenance.enabled }">{{ maintenance.enabled ? 'Maintenance active' : 'Website online' }}</span>
+        </div>
+        <div class="maintenance-control-body">
+            <div>
+                <strong>{{ maintenance.enabled ? 'Only administrators can access the application.' : 'The website is available normally.' }}</strong>
+                <p>{{ maintenance.message }}</p>
+                <small v-if="maintenance.updated_at">Last changed {{ new Date(maintenance.updated_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }) }}</small>
+            </div>
+            <button
+                ref="maintenanceLaunch"
+                class="btn"
+                :class="maintenance.enabled ? 'primary' : 'danger'"
+                type="button"
+                @click="openMaintenanceDialog(!maintenance.enabled)"
+            >
+                {{ maintenance.enabled ? 'Restore website access' : 'Start maintenance' }}
+            </button>
+        </div>
+        <p v-if="maintenanceMessage" class="notice" role="status">{{ maintenanceMessage }}</p>
+    </section>
+
     <section v-if="sync" class="panel sync-panel">
         <div class="panel-head"><div><h2>Store synchronization</h2><small>{{ sync.enabled ? `Local node: ${sync.node_id}` : 'Cloud deployment' }}</small></div><span class="tag" :class="{ warn: sync.conflicts || !sync.online }">{{ sync.enabled ? (sync.online ? 'Connected' : 'Offline') : 'Cloud mode' }}</span></div>
         <div class="sync-grid">
@@ -85,4 +215,57 @@ onMounted(loadSync);
         </div>
         <p v-if="syncMessage || sync.message" class="notice">{{ syncMessage || sync.message }}</p>
     </section>
+
+    <div
+        v-if="showMaintenanceDialog"
+        class="modal"
+        @click.self="closeMaintenanceDialog()"
+        @keydown="handleMaintenanceDialogKeydown"
+    >
+        <form
+            ref="maintenanceDialog"
+            class="modal-card maintenance-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="maintenance-dialog-title"
+            @submit.prevent="saveMaintenance"
+        >
+            <div class="panel-head">
+                <div>
+                    <span class="maintenance-kicker">Administrator confirmation</span>
+                    <h2 id="maintenance-dialog-title">{{ maintenanceForm.enabled ? 'Start website maintenance' : 'Restore website access' }}</h2>
+                </div>
+                <button type="button" class="btn ghost" :disabled="maintenanceBusy" @click="closeMaintenanceDialog()">Close</button>
+            </div>
+            <p :class="maintenanceForm.enabled ? 'maintenance-warning' : 'notice'">
+                {{ maintenanceForm.enabled
+                    ? 'Customers, assistants, cashiers, and ordinary users will be signed out or blocked immediately. You will retain administrator access.'
+                    : 'This will reopen the storefront and staff workspaces immediately.' }}
+            </p>
+            <label v-if="maintenanceForm.enabled">Public maintenance message
+                <textarea v-model="maintenanceForm.message" rows="3" maxlength="240" required></textarea>
+            </label>
+            <label>Administrator password
+                <span class="password-field">
+                    <input v-model="maintenanceForm.current_password" :type="showMaintenancePassword ? 'text' : 'password'" autocomplete="current-password" required>
+                    <button
+                        class="password-eye"
+                        type="button"
+                        :aria-label="showMaintenancePassword ? 'Hide administrator password' : 'Show administrator password'"
+                        :aria-pressed="showMaintenancePassword"
+                        @click="showMaintenancePassword = !showMaintenancePassword"
+                    >
+                        {{ showMaintenancePassword ? 'Hide' : 'Show' }}
+                    </button>
+                </span>
+            </label>
+            <label>Type <strong>{{ maintenanceForm.enabled ? 'START MAINTENANCE' : 'RESTORE WEBSITE' }}</strong>
+                <input v-model="maintenanceForm.confirmation" autocomplete="off" required>
+            </label>
+            <p v-if="maintenanceMessage" class="error" role="alert">{{ maintenanceMessage }}</p>
+            <button class="btn full" :class="maintenanceForm.enabled ? 'danger' : 'primary'" :disabled="maintenanceBusy">
+                {{ maintenanceBusy ? 'Applying…' : maintenanceForm.enabled ? 'Confirm maintenance shutdown' : 'Confirm website restoration' }}
+            </button>
+        </form>
+    </div>
 </template>

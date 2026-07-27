@@ -17,6 +17,8 @@ const busy = ref(false);
 const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
 const mobilePanel = ref("products");
+const posRoot = ref(null);
+const isFullscreen = ref(false);
 let checkoutKey = crypto.randomUUID();
 let scannerBuffer = "";
 let scannerStartedAt = 0;
@@ -90,15 +92,52 @@ const money = (value) =>
     });
 
 onMounted(async () => {
+    document.addEventListener("keydown", captureScannerKey, true);
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    syncFullscreenState();
     await inventory.load();
     inventory.start();
-    document.addEventListener("keydown", captureScannerKey, true);
 });
 onBeforeUnmount(() => {
     inventory.stop();
     document.removeEventListener("keydown", captureScannerKey, true);
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
+    document.body.classList.remove("pos-focus-mode");
+    if (document.fullscreenElement === posRoot.value) {
+        document.exitFullscreen().catch(() => {});
+    }
     clearTimeout(scannerTimer);
 });
+
+function syncFullscreenState() {
+    const active = document.fullscreenElement === posRoot.value;
+    isFullscreen.value = active;
+    document.body.classList.toggle("pos-focus-mode", active);
+}
+
+async function toggleFullscreen() {
+    try {
+        if (document.fullscreenElement === posRoot.value) {
+            await document.exitFullscreen();
+            return;
+        }
+
+        if (!posRoot.value?.requestFullscreen) {
+            isFullscreen.value = !isFullscreen.value;
+            document.body.classList.toggle(
+                "pos-focus-mode",
+                isFullscreen.value,
+            );
+            return;
+        }
+
+        await posRoot.value.requestFullscreen();
+        syncFullscreenState();
+    } catch {
+        message.value =
+            "Fullscreen could not be opened. Check the browser permission and try again.";
+    }
+}
 
 function add(product) {
     const item = cart.value.find((value) => value.id === product.id);
@@ -208,11 +247,34 @@ async function checkout() {
 </script>
 
 <template>
-    <div class="pos-page" :class="{ 'cashier-pos': auth.role === 'cashier' }">
+    <div
+        ref="posRoot"
+        class="pos-page"
+        :class="{
+            'cashier-pos': auth.role === 'cashier',
+            'pos-focus-active': isFullscreen,
+        }"
+    >
     <PageHeader
         title="POS Terminal"
         subtitle="Fast counter checkout with transaction-safe stock deduction"
-        ><span class="live">● Inventory live</span></PageHeader
+        ><div class="actions pos-header-actions">
+            <span class="live">● Inventory live</span>
+            <button
+                v-if="auth.role === 'admin'"
+                class="btn"
+                type="button"
+                :aria-pressed="isFullscreen"
+                :aria-label="
+                    isFullscreen
+                        ? 'Exit POS fullscreen'
+                        : 'Open POS fullscreen'
+                "
+                @click="toggleFullscreen"
+            >
+                {{ isFullscreen ? "Exit fullscreen" : "Fullscreen POS" }}
+            </button>
+        </div></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
     <nav class="pos-mobile-tabs" aria-label="POS workspace">
@@ -412,6 +474,17 @@ async function checkout() {
 
 <style scoped>
 .pos-page { min-width: 0; }
+.pos-header-actions { align-items: center; }
+.pos-page:fullscreen {
+    width: 100%;
+    height: 100dvh;
+    padding: 14px;
+    overflow-y: auto;
+    background: var(--page);
+}
+.pos-page:fullscreen > .page-header {
+    margin-bottom: 12px;
+}
 .pos-mobile-tabs { display: none; }
 .pos-workstation {
     grid-template-columns: minmax(390px, .82fr) minmax(0, 1.28fr);
@@ -484,6 +557,35 @@ async function checkout() {
 .tender-grid button.active { border-color: var(--brand); color: var(--brand); background: var(--soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .tender-note { color: var(--muted); line-height: 1.4; }
 @media (min-width: 1241px) {
+    .pos-page.pos-focus-active {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .pos-page.pos-focus-active > .page-header,
+    .pos-page.pos-focus-active > .notice {
+        flex: 0 0 auto;
+    }
+    .pos-page.pos-focus-active > .notice {
+        margin-bottom: 8px;
+        padding-block: 8px;
+    }
+    .pos-page.pos-focus-active .pos-workstation {
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .pos-page.pos-focus-active .product-library,
+    .pos-page.pos-focus-active .sale-ticket {
+        height: 100%;
+        min-height: 0;
+        max-height: none;
+        margin-bottom: 0;
+        overflow: hidden;
+    }
     .pos-page.cashier-pos {
         display: flex;
         flex-direction: column;

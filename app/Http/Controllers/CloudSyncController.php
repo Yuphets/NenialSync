@@ -11,8 +11,10 @@ use App\Models\PayrollRun;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SyncReceipt;
+use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\InventoryService;
+use App\Services\MaintenanceModeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -140,7 +142,8 @@ class CloudSyncController extends Controller
     public function configuration()
     {
         return [
-            'capabilities' => ['device_sync' => true],
+            'capabilities' => ['device_sync' => true, 'maintenance_sync' => true],
+            'maintenance' => app(MaintenanceModeService::class)->status(),
             'users' => User::withTrashed()->orderBy('email')->get()->map(fn (User $user) => [
                 'name' => $user->name, 'email' => $user->email,
                 'password_hash' => $user->getRawOriginal('password'), 'role' => $user->role,
@@ -177,6 +180,47 @@ class CloudSyncController extends Controller
                     'updated_at' => $enrollment->updated_at?->toIso8601String(),
                 ]),
         ];
+    }
+
+    public function maintenance(Request $request, MaintenanceModeService $maintenance)
+    {
+        $data = $request->validate([
+            'node_id' => 'required|string|max:80',
+            'event_id' => 'required|uuid',
+            'payload.enabled' => 'required|boolean',
+            'payload.message' => 'nullable|string|max:240',
+            'payload.started_at' => 'nullable|date',
+            'payload.updated_at' => 'nullable|date',
+            'payload.authorized_by_email' => 'required|email',
+        ]);
+
+        if (SyncReceipt::where('node_id', $data['node_id'])->where('event_id', $data['event_id'])->exists()) {
+            return $maintenance->status();
+        }
+
+        $actor = User::query()
+            ->whereRaw('LOWER(email) = ?', [mb_strtolower($data['payload']['authorized_by_email'])])
+            ->where('role', 'admin')
+            ->where('is_active', true)
+            ->first();
+        abort_unless($actor, 422, 'The administrator who authorized this maintenance change is not active on the cloud site.');
+
+        $status = DB::transaction(function () use ($data, $maintenance, $actor) {
+            $status = $maintenance->applyRemote($data['payload'], $actor);
+            $setting = SystemSetting::where('key', MaintenanceModeService::KEY)->firstOrFail();
+            SyncReceipt::create([
+                'node_id' => $data['node_id'],
+                'event_id' => $data['event_id'],
+                'event_type' => 'system.maintenance_updated',
+                'result_type' => SystemSetting::class,
+                'result_id' => $setting->id,
+                'received_at' => now(),
+            ]);
+
+            return $status;
+        });
+
+        return response()->json($status, 201);
     }
 
     public function sale(Request $request, InventoryService $inventory)

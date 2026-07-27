@@ -6,7 +6,7 @@ Production-oriented Laravel 13 + Vue 3 application for a walk-in construction su
 
 - Role-based authentication: Admin, Assistant Admin, Cashier, Customer
 - Live storefront backed by current sellable inventory
-- POS with USB keyboard-wedge and browser-camera barcode scanning
+- POS with automatic USB keyboard-wedge barcode scanning
 - Transactional inventory with row locks, retry-safe checkout keys, reservations, safety stock, versioning, and an immutable movement ledger
 - Protected online orders: stock is reserved at checkout and deducted only after delivered goods are confirmed received
 - Employee management, Philippine statutory deductions, incentives, overtime, payroll runs
@@ -138,8 +138,7 @@ Customer accounts should be created through the public sign-up flow so email ver
 2. Enable an **Enter / CR suffix** after every scan.
 3. Match the scanner keyboard locale to the POS computer.
 4. Print a supported symbology (EAN-13, UPC-A, Code 128) matching `products.barcode`.
-5. Open POS Terminal. The barcode field accepts the scan and Enter completes lookup.
-6. Use the built-in camera scanner only as a fallback and grant browser camera permission over HTTPS.
+5. Open POS Terminal and scan from anywhere on the screen. Fast keyboard-wedge input is recognized automatically, so the barcode field does not need focus; the Enter suffix is still accepted.
 
 Test ten repeated scans before opening the register. A scan must resolve exactly one SKU and must never add beyond `available_quantity`.
 
@@ -213,6 +212,17 @@ Manual synchronization and status checks:
 docker compose -f docker-compose.local.yml exec app php artisan local:sync
 docker compose -f docker-compose.local.yml logs -f sync
 ```
+
+## Administrator maintenance mode
+
+An active Admin can open **Settings → Maintenance mode** to temporarily close the storefront and non-admin workspaces. Starting or ending maintenance requires the current administrator password and the displayed confirmation phrase. While maintenance is active:
+
+- Public pages return an HTTP 503 maintenance notice, and customers, assistants, and cashiers cannot sign in or continue using an already-open workspace.
+- The login page remains available for an active Admin, who can restore the website from Settings.
+- Trusted store synchronization, registered facial-attendance devices, health checks, and signed PayMongo webhooks remain operational.
+- The maintenance decision is synchronized between the Vercel/Neon deployment and the store-local Docker node. Stale events cannot overwrite a newer decision, and the authorizing active Admin is recorded in the audit log.
+
+The application database and session database must remain reachable for administrator recovery. Infrastructure-level database outages still require recovery through Neon/PostgreSQL and the deployment platform.
 
 ## Facial-recognition terminal setup
 

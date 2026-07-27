@@ -38,6 +38,7 @@ class CompanyBackupService
                 'configuration', 'is_active', 'last_seen_at', 'created_at', 'updated_at',
             ]),
             'audit_logs' => DB::table('audit_logs')->orderBy('id')->get(),
+            'system_settings' => DB::table('system_settings')->orderBy('id')->get(),
             'sync_conflicts' => DB::table('sync_conflicts')->orderBy('id')->get(),
         ];
     }

@@ -3,12 +3,14 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CloudSyncController;
 use App\Http\Controllers\LocalSyncController;
+use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProductController;
 use Illuminate\Support\Facades\Route;
 
-Route::prefix('api')->group(function () {
+Route::prefix('api')->middleware('site.available')->group(function () {
+    Route::get('/system/status', [MaintenanceController::class, 'status']);
     Route::get('/storefront/products', [ProductController::class, 'index']);
     Route::get('/auth/capabilities', [AuthController::class, 'capabilities']);
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
@@ -40,6 +42,7 @@ Route::prefix('api')->group(function () {
         Route::post('/sync/order-status', [CloudSyncController::class, 'orderStatus']);
         Route::post('/sync/devices', [CloudSyncController::class, 'device']);
         Route::post('/sync/face-enrollments', [CloudSyncController::class, 'faceEnrollment']);
+        Route::post('/sync/maintenance', [CloudSyncController::class, 'maintenance']);
     });
 
     Route::middleware('auth')->group(function () {
@@ -50,6 +53,7 @@ Route::prefix('api')->group(function () {
         Route::get('/products', [ProductController::class, 'index']);
         Route::get('/inventory/changes', [ProductController::class, 'changes']);
         Route::middleware('role:admin')->group(function () {
+            Route::put('/admin/maintenance', [MaintenanceController::class, 'update'])->middleware('throttle:6,1');
             Route::post('/products', [ProductController::class, 'store']);
             Route::put('/products/{product}', [ProductController::class, 'update']);
             Route::delete('/products/{product}', [ProductController::class, 'destroy']);
@@ -91,7 +95,7 @@ Route::prefix('api')->group(function () {
     });
 });
 
-Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])->middleware('throttle:20,1');
-Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])->middleware('throttle:20,1');
+Route::get('/auth/google/redirect', [AuthController::class, 'googleRedirect'])->middleware(['site.available', 'throttle:20,1']);
+Route::get('/auth/google/callback', [AuthController::class, 'googleCallback'])->middleware(['site.available', 'throttle:20,1']);
 
-Route::view('/{path?}', 'app')->where('path', '^(?!api).*$');
+Route::view('/{path?}', 'app')->where('path', '^(?!api).*$')->middleware('site.available');

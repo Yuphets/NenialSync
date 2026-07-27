@@ -3,19 +3,31 @@
 namespace App\Services;
 
 use App\Models\AttendanceRecord;
-use App\Models\Sale;
+use App\Models\Device;
 use App\Models\Employee;
 use App\Models\FaceEnrollment;
 use App\Models\Order;
-use App\Models\Device;
-use App\Models\Product;
-use App\Models\User;
-use App\Models\SyncOutbox;
 use App\Models\PayrollRun;
+use App\Models\Product;
+use App\Models\Sale;
+use App\Models\SyncOutbox;
+use App\Models\SystemSetting;
+use App\Models\User;
 use Illuminate\Support\Str;
 
 class OfflineOutboxService
 {
+    public function queueMaintenance(array $status, User $actor): void
+    {
+        $this->queue('system.maintenance_updated', SystemSetting::class, 1, [
+            'enabled' => (bool) ($status['enabled'] ?? false),
+            'message' => $status['message'] ?? MaintenanceModeService::DEFAULT_MESSAGE,
+            'started_at' => $status['started_at'] ?? null,
+            'updated_at' => $status['updated_at'] ?? now()->toIso8601String(),
+            'authorized_by_email' => $actor->email,
+        ]);
+    }
+
     public function queueProduct(Product $product): void
     {
         $this->queue('product.updated', Product::class, $product->id, [
@@ -44,7 +56,9 @@ class OfflineOutboxService
 
     public function queueOrderPlaced(Order $order): void
     {
-        if (! config('offline.enabled')) return;
+        if (! config('offline.enabled')) {
+            return;
+        }
         $order->loadMissing('items', 'customer');
         SyncOutbox::firstOrCreate(
             ['event_type' => 'order.placed', 'aggregate_type' => Order::class, 'aggregate_id' => $order->id],
@@ -61,7 +75,9 @@ class OfflineOutboxService
 
     public function queueOrderStatus(Order $order, User $actor): void
     {
-        if (! config('offline.enabled')) return;
+        if (! config('offline.enabled')) {
+            return;
+        }
         SyncOutbox::create([
             'event_id' => (string) Str::uuid(),
             'event_type' => 'order.status_updated',
@@ -220,11 +236,14 @@ class OfflineOutboxService
 
     private function queue(string $eventType, string $aggregateType, int $aggregateId, array $payload): void
     {
-        if (! config('offline.enabled')) return;
+        if (! config('offline.enabled')) {
+            return;
+        }
         $pending = SyncOutbox::where('event_type', $eventType)->where('aggregate_type', $aggregateType)
             ->where('aggregate_id', $aggregateId)->whereIn('status', ['pending', 'failed'])->first();
         if ($pending) {
             $pending->update(['payload' => $payload, 'status' => 'pending', 'last_error' => null]);
+
             return;
         }
         SyncOutbox::create(['event_id' => (string) Str::uuid(), 'event_type' => $eventType, 'aggregate_type' => $aggregateType, 'aggregate_id' => $aggregateId, 'payload' => $payload]);

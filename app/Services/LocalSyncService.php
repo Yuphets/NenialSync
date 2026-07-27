@@ -22,7 +22,10 @@ use Throwable;
 
 class LocalSyncService
 {
-    public function __construct(private readonly OfflineOutboxService $outbox) {}
+    public function __construct(
+        private readonly OfflineOutboxService $outbox,
+        private readonly MaintenanceModeService $maintenance,
+    ) {}
 
     public function run(): array
     {
@@ -221,6 +224,7 @@ class LocalSyncService
             'device.updated' => '/api/sync/devices',
             'face.enrollment_updated' => '/api/sync/face-enrollments',
             'payroll.finalized' => '/api/sync/payroll-runs',
+            'system.maintenance_updated' => '/api/sync/maintenance',
             default => throw new RuntimeException("Unsupported sync event {$event->event_type}."),
         };
 
@@ -250,6 +254,10 @@ class LocalSyncService
 
     private function applyConfiguration(array $configuration): void
     {
+        if (isset($configuration['maintenance']) && is_array($configuration['maintenance'])) {
+            $this->maintenance->applyRemote($configuration['maintenance']);
+        }
+
         $remoteUsers = collect($configuration['users'] ?? [])
             ->filter(fn ($remote) => is_array($remote) && isset($remote['email']))
             ->values();
