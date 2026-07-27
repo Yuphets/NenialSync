@@ -32,6 +32,10 @@ class VerifiedAuthPaymentAttendanceTest extends TestCase
         $this->getJson('/api/local-sync/status')
             ->assertUnauthorized()
             ->assertJsonPath('message', 'Unauthenticated.');
+
+        $this->get('/api/local-sync/status')
+            ->assertUnauthorized()
+            ->assertJsonPath('message', 'Unauthenticated.');
     }
 
     public function test_employee_can_only_time_in_once_per_philippine_day(): void

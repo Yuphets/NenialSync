@@ -20,6 +20,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // Vercel terminates TLS before forwarding requests to the PHP function.
         // Trust its forwarding headers so generated Vite asset URLs remain HTTPS.
         $middleware->trustProxies(at: '*');
+        $middleware->redirectGuestsTo(
+            fn (Request $request) => $request->is('api/*') ? null : '/login'
+        );
         $middleware->alias([
             'role' => EnsureRole::class,
             'device' => AuthenticateDevice::class,
