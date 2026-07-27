@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Device;
 use App\Models\Employee;
 use App\Models\PasswordResetTicket;
+use App\Models\PayrollRun;
 use App\Models\Product;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
@@ -73,6 +74,74 @@ class TaxPasswordAndTerminalTest extends TestCase
         $assistant = User::where('role', 'assistant')->first();
         $this->actingAs($assistant)->get('/api/payroll/export?period_start=2026-06-25&period_end=2026-07-01')
             ->assertOk()->assertHeader('content-type', 'text/csv; charset=UTF-8');
+    }
+
+    public function test_payroll_cannot_be_finalized_without_active_employees(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        Employee::query()->update(['is_active' => false]);
+
+        $this->actingAs($admin)->postJson('/api/payroll/runs', [
+            'period_start' => '2026-07-15',
+            'period_end' => '2026-07-21',
+        ])->assertUnprocessable()
+            ->assertJsonPath(
+                'message',
+                'Payroll cannot be finalized because there are no active employees.'
+            );
+
+        $this->assertDatabaseCount('payroll_runs', 0);
+    }
+
+    public function test_finalized_payroll_download_uses_the_immutable_snapshot(): void
+    {
+        $admin = User::where('role', 'admin')->firstOrFail();
+        $employee = Employee::where('is_active', true)->firstOrFail();
+        $original = [
+            'employee_number' => $employee->employee_number,
+            'name' => $employee->name,
+            'job_title' => $employee->job_title,
+        ];
+
+        $this->actingAs($admin)->postJson('/api/payroll/runs', [
+            'period_start' => '2026-07-20',
+            'period_end' => '2026-07-26',
+        ])->assertCreated();
+
+        $run = PayrollRun::with('items')->firstOrFail();
+        $item = $run->items->firstWhere('employee_id', $employee->id);
+        $this->assertNotNull($item);
+        $snapshotBasePay = (float) $item->base_pay;
+        $snapshotNetPay = (float) $item->net_pay;
+
+        $employee->update([
+            'name' => 'Changed After Finalization',
+            'job_title' => 'Changed Role',
+            'weekly_salary' => $snapshotBasePay + 9999,
+            'incentive' => 9999,
+        ]);
+        $employee->delete();
+
+        $response = $this->actingAs($admin)->getJson(
+            '/api/payroll/export-data?period_start=2026-07-20&period_end=2026-07-26'
+        )->assertOk()
+            ->assertJsonPath('source', 'finalized')
+            ->assertJsonPath('finalized', true)
+            ->assertJsonPath('reference', $run->reference);
+
+        $row = collect($response->json('rows'))
+            ->firstWhere('employee.employee_number', $original['employee_number']);
+        $this->assertNotNull($row);
+        $this->assertSame($original['name'], data_get($row, 'employee.name'));
+        $this->assertSame($original['job_title'], data_get($row, 'employee.job_title'));
+        $this->assertEquals($snapshotBasePay, data_get($row, 'calculation.base_pay'));
+        $this->assertEquals($snapshotNetPay, data_get($row, 'calculation.net_pay'));
+
+        $csv = $this->actingAs($admin)->get(
+            '/api/payroll/export?period_start=2026-07-20&period_end=2026-07-26'
+        )->assertOk()->streamedContent();
+        $this->assertStringContainsString($original['name'], $csv);
+        $this->assertStringNotContainsString('Changed After Finalization', $csv);
     }
 
     public function test_sync_configuration_contains_accounts_workforce_and_devices(): void

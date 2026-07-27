@@ -35,7 +35,12 @@ class ProductController extends Controller
                 ? $inventory->adjust($product, $openingStock, 0, 'opening_stock', $request->user(), 'Opening inventory balance')
                 : $product;
         });
-        $outbox->queueProduct($product->fresh());
+        $outbox->queueProduct($product->fresh(), [
+            'version' => 0,
+            'stock_quantity' => 0,
+            'reserved_quantity' => 0,
+            'updated_at' => null,
+        ]);
 
         return response()->json($product, 201);
     }
@@ -45,8 +50,9 @@ class ProductController extends Controller
         $this->admin($request);
         $data = $this->validated($request, $product->id);
         unset($data['stock_quantity']);
-        $product->update($data);
-        $outbox->queueProduct($product->fresh());
+        $base = $this->syncBase($product);
+        $product->update([...$data, 'version' => $product->version + 1]);
+        $outbox->queueProduct($product->fresh(), $base);
 
         return $product->fresh();
     }
@@ -55,9 +61,10 @@ class ProductController extends Controller
     {
         $this->admin($request);
         abort_if($product->reserved_quantity > 0, 422, 'Products with active reservations cannot be removed.');
-        $product->update(['is_active' => false]);
+        $base = $this->syncBase($product);
+        $product->update(['is_active' => false, 'version' => $product->version + 1]);
         $product->delete();
-        $outbox->queueProduct($product);
+        $outbox->queueProduct($product, $base);
 
         return response()->noContent();
     }
@@ -67,8 +74,9 @@ class ProductController extends Controller
         $this->admin($request);
         $data = $request->validate(['quantity_delta' => 'required|integer|not_in:0', 'reason' => 'required|string|max:255']);
 
+        $base = $this->syncBase($product);
         $product = $inventory->adjust($product, $data['quantity_delta'], 0, 'manual_adjustment', $request->user(), $data['reason']);
-        $outbox->queueProduct($product->fresh());
+        $outbox->queueProduct($product->fresh(), $base);
 
         return $product;
     }
@@ -88,5 +96,18 @@ class ProductController extends Controller
     private function validated(Request $r, ?int $id = null)
     {
         return $r->validate(['name' => 'required|string|max:190', 'sku' => 'required|string|max:80|unique:products,sku,'.($id ?? 'NULL'), 'barcode' => 'required|string|max:120|unique:products,barcode,'.($id ?? 'NULL'), 'category' => 'required|string|max:80', 'supplier' => 'nullable|string|max:190', 'unit' => 'required|string|max:32', 'price' => 'required|numeric|min:0.01', 'discount_percent' => 'nullable|numeric|min:0|max:100', 'stock_quantity' => $id ? 'sometimes|integer|min:0' : 'required|integer|min:0', 'safety_stock' => 'nullable|integer|min:0', 'reorder_level' => 'nullable|integer|min:0', 'image_url' => 'nullable|url|max:2048', 'is_active' => 'boolean']);
+    }
+
+    private function syncBase(Product $product): array
+    {
+        return [
+            ...$product->only([
+                'name', 'sku', 'barcode', 'category', 'supplier', 'unit', 'price',
+                'discount_percent', 'stock_quantity', 'reserved_quantity',
+                'safety_stock', 'reorder_level', 'version', 'image_url', 'is_active',
+            ]),
+            'updated_at' => $product->updated_at,
+            'deleted_at' => $product->deleted_at,
+        ];
     }
 }

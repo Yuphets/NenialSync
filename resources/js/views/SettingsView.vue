@@ -11,6 +11,8 @@ const syncMessage = ref('');
 const showPasswords = ref(false);
 const sync = ref(null);
 const syncing = ref(false);
+const conflicts = ref([]);
+const resolvingConflict = ref(null);
 const maintenance = ref(null);
 const maintenanceBusy = ref(false);
 const maintenanceMessage = ref('');
@@ -39,8 +41,23 @@ async function loadSync() {
     if (!['admin', 'assistant'].includes(auth.role)) return;
     try {
         sync.value = (await axios.get('/api/local-sync/status')).data;
+        await loadConflicts();
     } catch {
         sync.value = null;
+        conflicts.value = [];
+    }
+}
+
+async function loadConflicts() {
+    if (auth.role !== 'admin' || !sync.value?.enabled) {
+        conflicts.value = [];
+        return;
+    }
+
+    try {
+        conflicts.value = (await axios.get('/api/local-sync/conflicts')).data.data || [];
+    } catch {
+        conflicts.value = [];
     }
 }
 
@@ -50,11 +67,42 @@ async function runSync() {
     try {
         sync.value = (await axios.post('/api/local-sync/run')).data;
         syncMessage.value = sync.value?.message || '';
+        await loadConflicts();
     } catch (error) {
         syncMessage.value = error.response?.data?.message || error.response?.data?.sync?.message || 'Cloud synchronization failed.';
         await loadSync();
     } finally {
         syncing.value = false;
+    }
+}
+
+async function resolveConflict(conflict, action) {
+    if (
+        action === 'accept_remote' &&
+        !confirm('Keep the cloud version and discard this store-local change? This cannot be undone.')
+    ) {
+        return;
+    }
+
+    resolvingConflict.value = conflict.id;
+    syncMessage.value = '';
+    try {
+        await axios.post(`/api/local-sync/conflicts/${conflict.id}/resolve`, {
+            action,
+        });
+        sync.value = (await axios.post('/api/local-sync/run')).data;
+        await loadConflicts();
+        syncMessage.value = sync.value?.online
+            ? action === 'retry'
+                ? 'The local change was retried and synchronization completed.'
+                : 'The conflict was resolved and the cloud version was applied locally.'
+            : sync.value?.message || 'The conflict was resolved, but synchronization is still offline.';
+    } catch (error) {
+        syncMessage.value =
+            error.response?.data?.message ||
+            'The synchronization conflict could not be resolved.';
+    } finally {
+        resolvingConflict.value = null;
     }
 }
 
@@ -211,10 +259,48 @@ onBeforeUnmount(() => {
             <div><span>Attendance</span><strong>{{ sync.attendance_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
             <div><span>Payroll snapshots</span><strong>{{ sync.payroll_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
             <div><span>Payroll standards</span><strong>{{ sync.statutory_rates_synced ? 'Synchronized' : (sync.enabled ? 'Awaiting cloud update' : 'Cloud source') }}</strong></div>
-            <div><span>Last synchronized</span><strong>{{ sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Not yet' }}</strong></div>
+            <div><span>Last synchronized</span><strong>{{ sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }) : 'Not yet' }}</strong></div>
             <button v-if="sync.enabled" class="btn primary" :disabled="syncing" @click="runSync">{{ syncing ? 'Synchronizing…' : 'Synchronize now' }}</button>
         </div>
         <p v-if="syncMessage || sync.message" class="notice">{{ syncMessage || sync.message }}</p>
+    </section>
+
+    <section v-if="conflicts.length" class="panel sync-conflicts">
+        <div class="panel-head">
+            <div>
+                <h2>Synchronization conflicts</h2>
+                <small>Review store-local changes that could not be applied safely to the cloud.</small>
+            </div>
+            <span class="tag warn">{{ conflicts.length }} open</span>
+        </div>
+        <div class="sync-conflict-list">
+            <article v-for="conflict in conflicts" :key="conflict.id" class="sync-conflict">
+                <div>
+                    <strong>{{ conflict.event_type.replaceAll('.', ' ') }}</strong>
+                    <p>{{ conflict.reason }}</p>
+                    <small>{{ new Date(conflict.created_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }) }}</small>
+                </div>
+                <div class="actions">
+                    <button
+                        v-if="conflict.can_retry"
+                        class="btn"
+                        type="button"
+                        :disabled="resolvingConflict === conflict.id"
+                        @click="resolveConflict(conflict, 'retry')"
+                    >
+                        Retry local change
+                    </button>
+                    <button
+                        class="btn danger"
+                        type="button"
+                        :disabled="resolvingConflict === conflict.id"
+                        @click="resolveConflict(conflict, 'accept_remote')"
+                    >
+                        Keep cloud version
+                    </button>
+                </div>
+            </article>
+        </div>
     </section>
 
     <div

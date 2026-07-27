@@ -212,20 +212,12 @@ async function checkout() {
 </template>
 
 <style scoped>
-:global(.store) { padding-top: 0 !important; }
 :global(.store-nav) {
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
     z-index: 1000;
     box-shadow: 0 10px 26px rgba(5, 28, 17, .16);
 }
 :global(.store-hero) {
-    padding-top: max(132px, calc(70px + env(safe-area-inset-top))) !important;
     background: linear-gradient(90deg, rgba(4, 27, 17, .95), rgba(4, 27, 17, .45)), url('/media/construction-supply-bg.png') center / cover no-repeat !important;
-    background-attachment: fixed !important;
 }
 :global(.store-hero h1) { text-shadow: 0 3px 18px rgba(0, 0, 0, .52); }
 :global(.store-hero p) { text-shadow: 0 2px 8px rgba(0, 0, 0, .42); }
@@ -294,10 +286,6 @@ async function checkout() {
 .product-dialog dt { color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 .product-dialog dd { margin: 0; font-size: .85rem; font-weight: 700; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
-    :global(.store-hero) {
-        padding-top: 190px !important;
-        background-attachment: scroll !important;
-    }
     .store-toast { top: 178px; right: 10px; left: 10px; max-width: none; }
     .cart-dock { right: 10px; bottom: 10px; left: 10px; align-items: center; flex-direction: row; gap: 9px; }
     .cart-dock-summary { flex: 1; }

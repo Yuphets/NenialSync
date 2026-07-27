@@ -126,7 +126,7 @@ const pagedProducts = computed(() =>
         </button></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
-    <section class="panel filters inline-filters">
+    <section class="panel filters inline-filters single-search-filter">
         <label>Search inventory<input v-model="search" placeholder="Product, SKU, barcode, supplier, category"></label>
         <button v-if="search" class="btn" @click="search = ''">Clear search</button>
         <small>{{ visibleProducts.length }} of {{ inventory.products.length }} products shown</small>

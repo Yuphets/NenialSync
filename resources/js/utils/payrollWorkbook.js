@@ -79,7 +79,12 @@ function formatPeriodDate(value) {
     }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
-export function buildPayrollWorkbook(preview, period, generatedAt = new Date()) {
+export function buildPayrollWorkbook(
+    preview,
+    period,
+    generatedAt = new Date(),
+    metadata = {},
+) {
     const rows = Array.isArray(preview) ? preview : [];
     const dataStartRow = 7;
     const dataEndRow = dataStartRow + rows.length - 1;
@@ -100,6 +105,10 @@ export function buildPayrollWorkbook(preview, period, generatedAt = new Date()) 
         timeZone: "Asia/Manila",
     });
     const periodLabel = `${formatPeriodDate(period.period_start)} – ${formatPeriodDate(period.period_end)}`;
+    const sourceLabel =
+        metadata.source === "finalized"
+            ? `Finalized payroll snapshot${metadata.reference ? ` · ${metadata.reference}` : ""}`
+            : "Current payroll preview";
     const summaryNumber = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
     const sheetData = [
@@ -273,7 +282,7 @@ export function buildPayrollWorkbook(preview, period, generatedAt = new Date()) 
             }),
         ],
         mergedRow(
-            `Prepared from the Nenial workforce payroll preview • ${rows.length} record${rows.length === 1 ? "" : "s"} • Totals are calculated automatically in Excel.`,
+            `Prepared from the Nenial ${sourceLabel.toLowerCase()} • ${rows.length} record${rows.length === 1 ? "" : "s"} • Totals are calculated automatically in Excel.`,
             {
                 height: 24,
                 fontSize: 9,
@@ -300,11 +309,16 @@ export function buildPayrollWorkbook(preview, period, generatedAt = new Date()) 
     };
 }
 
-export async function downloadPayrollWorkbook(preview, period) {
+export async function downloadPayrollWorkbook(preview, period, metadata = {}) {
     const { default: writeExcelFile } = await import(
         "write-excel-file/browser"
     );
-    const { sheetData, options } = buildPayrollWorkbook(preview, period);
+    const { sheetData, options } = buildPayrollWorkbook(
+        preview,
+        period,
+        new Date(),
+        metadata,
+    );
     const filename = `nenial-payroll-${period.period_start}-to-${period.period_end}.xlsx`;
 
     await writeExcelFile(sheetData, options).toFile(filename);

@@ -17,6 +17,10 @@ use Illuminate\Support\Str;
 
 class OfflineOutboxService
 {
+    public function __construct(
+        private readonly PayrollSnapshotService $payrollSnapshots,
+    ) {}
+
     public function queueMaintenance(array $status, User $actor): void
     {
         $this->queue('system.maintenance_updated', SystemSetting::class, 1, [
@@ -28,16 +32,86 @@ class OfflineOutboxService
         ]);
     }
 
-    public function queueProduct(Product $product): void
+    /**
+     * Queue a product mutation with enough context for the cloud to reconcile
+     * inventory without trusting a stale absolute stock snapshot.
+     *
+     * @param  array{version?: int, stock_quantity?: int, reserved_quantity?: int, updated_at?: mixed, deleted_at?: mixed}|null  $base
+     */
+    public function queueProduct(Product $product, ?array $base = null): void
     {
-        $this->queue('product.updated', Product::class, $product->id, [
+        if (! config('offline.enabled')) {
+            return;
+        }
+
+        $payload = [
             ...$product->only([
                 'name', 'sku', 'barcode', 'category', 'supplier', 'unit', 'price',
                 'discount_percent', 'stock_quantity', 'reserved_quantity', 'safety_stock',
                 'reorder_level', 'version', 'image_url', 'is_active',
             ]),
             'deleted_at' => $product->deleted_at?->toIso8601String(),
-        ]);
+            'updated_at' => $product->updated_at?->toIso8601String(),
+        ];
+
+        if ($base !== null) {
+            $metadataFields = [
+                'name', 'sku', 'barcode', 'category', 'supplier', 'unit', 'price',
+                'discount_percent', 'safety_stock', 'reorder_level', 'image_url',
+                'is_active', 'deleted_at',
+            ];
+            $payload['sync'] = [
+                'base_version' => max(0, (int) ($base['version'] ?? 0)),
+                'base_updated_at' => $this->dateString($base['updated_at'] ?? null),
+                'stock_delta' => (int) $product->stock_quantity - (int) ($base['stock_quantity'] ?? 0),
+                'reserved_delta' => (int) $product->reserved_quantity - (int) ($base['reserved_quantity'] ?? 0),
+                'metadata_changed' => collect($metadataFields)->contains(
+                    fn (string $field) => $this->comparable($payload[$field] ?? null) !== $this->comparable($base[$field] ?? null)
+                ),
+                'captured_at' => now()->toIso8601String(),
+            ];
+        }
+
+        $pending = SyncOutbox::where('event_type', 'product.updated')
+            ->where('aggregate_type', Product::class)
+            ->where('aggregate_id', $product->id)
+            ->whereIn('status', ['pending', 'failed'])
+            ->first();
+
+        if (! $pending) {
+            SyncOutbox::create([
+                'event_id' => (string) Str::uuid(),
+                'event_type' => 'product.updated',
+                'aggregate_type' => Product::class,
+                'aggregate_id' => $product->id,
+                'payload' => $payload,
+            ]);
+
+            return;
+        }
+
+        $previous = $pending->payload;
+        if (isset($previous['sync']) && is_array($previous['sync'])) {
+            $previousSync = $previous['sync'];
+            $nextSync = $payload['sync'] ?? [];
+            $payload['sync'] = [
+                'base_version' => max(0, (int) ($previousSync['base_version'] ?? 0)),
+                'base_updated_at' => $previousSync['base_updated_at'] ?? null,
+                'stock_delta' => (int) ($previousSync['stock_delta'] ?? 0)
+                    + (int) ($nextSync['stock_delta'] ?? ((int) $payload['stock_quantity'] - (int) ($previous['stock_quantity'] ?? 0))),
+                'reserved_delta' => (int) ($previousSync['reserved_delta'] ?? 0)
+                    + (int) ($nextSync['reserved_delta'] ?? ((int) $payload['reserved_quantity'] - (int) ($previous['reserved_quantity'] ?? 0))),
+                'metadata_changed' => (bool) ($previousSync['metadata_changed'] ?? true)
+                    || (bool) ($nextSync['metadata_changed'] ?? true),
+                'captured_at' => $nextSync['captured_at'] ?? now()->toIso8601String(),
+            ];
+        } elseif (isset($payload['sync'])) {
+            // A pre-upgrade event has no trustworthy base version. Keep it in
+            // legacy snapshot mode so the cloud can reject unsafe stock drift.
+            unset($payload['sync']);
+        }
+
+        $pending->update(['payload' => $payload, 'status' => 'pending', 'last_error' => null]);
     }
 
     public function queueDevice(Device $device): void
@@ -95,9 +169,15 @@ class OfflineOutboxService
         ]);
     }
 
-    public function queueUser(User $user, ?string $lookupEmail = null): void
+    public function queueUser(User $user, ?string $lookupEmail = null, User|string|null $authorizedBy = null): void
     {
-        $this->queue('user.account_updated', User::class, $user->id, [
+        if (! config('offline.enabled')) {
+            return;
+        }
+
+        $authorizedByEmail = $authorizedBy instanceof User ? $authorizedBy->email : $authorizedBy;
+
+        $payload = [
             'name' => $user->name,
             'email' => $user->email,
             'password_hash' => $user->getRawOriginal('password'),
@@ -111,7 +191,11 @@ class OfflineOutboxService
             'deleted_at' => $user->deleted_at?->toIso8601String(),
             'erased_identity_hash' => $user->erased_identity_hash,
             'lookup_email' => $lookupEmail ?: $user->email,
-        ]);
+            'authorized_by_email' => $authorizedByEmail,
+            'sync_version' => (int) $user->sync_version,
+        ];
+
+        $this->queue('user.account_updated', User::class, $user->id, $payload);
     }
 
     public function queueEmployee(Employee $employee): void
@@ -219,19 +303,12 @@ class OfflineOutboxService
 
     public function queuePayrollRun(PayrollRun $run): void
     {
-        $run->loadMissing('creator', 'items.employee');
-        $this->queue('payroll.finalized', PayrollRun::class, $run->id, [
-            'reference' => $run->reference,
-            'period_start' => $run->period_start->format('Y-m-d'),
-            'period_end' => $run->period_end->format('Y-m-d'),
-            'status' => $run->status,
-            'created_by_email' => $run->creator->email,
-            'finalized_at' => $run->finalized_at?->toIso8601String(),
-            'items' => $run->items->map(fn ($item) => [
-                'employee_number' => $item->employee->employee_number,
-                ...$item->only(['base_pay', 'incentive', 'overtime_pay', 'gross_pay', 'sss', 'pagibig', 'philhealth', 'net_pay', 'calculation']),
-            ])->values()->all(),
-        ]);
+        $this->queue(
+            'payroll.finalized',
+            PayrollRun::class,
+            $run->id,
+            $this->payrollSnapshots->payload($run)
+        );
     }
 
     private function queue(string $eventType, string $aggregateType, int $aggregateId, array $payload): void
@@ -247,5 +324,27 @@ class OfflineOutboxService
             return;
         }
         SyncOutbox::create(['event_id' => (string) Str::uuid(), 'event_type' => $eventType, 'aggregate_type' => $aggregateType, 'aggregate_id' => $aggregateId, 'payload' => $payload]);
+    }
+
+    private function dateString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $value instanceof \DateTimeInterface ? $value->format(DATE_ATOM) : (string) $value;
+    }
+
+    private function comparable(mixed $value): mixed
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format(DATE_ATOM);
+        }
+
+        if (is_bool($value)) {
+            return $value ? 1 : 0;
+        }
+
+        return is_numeric($value) ? (string) $value : $value;
     }
 }

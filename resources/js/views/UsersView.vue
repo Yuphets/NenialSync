@@ -168,7 +168,9 @@ onMounted(load);
                     ><small
                         >{{ ticket.ticket_number }} ·
                         {{
-                            new Date(ticket.requested_at).toLocaleString()
+                            new Date(ticket.requested_at).toLocaleString("en-US", {
+                                timeZone: "Asia/Manila",
+                            })
                         }}</small
                     >
                     <p>{{ ticket.reason }}</p>
@@ -185,7 +187,7 @@ onMounted(load);
     </section>
 
     <section class="panel">
-        <div class="filters">
+        <div class="filters single-user-filter">
             <label
                 >Search users<input
                     v-model="search"

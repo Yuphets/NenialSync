@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\AuthenticateDevice;
 use App\Http\Middleware\AuthenticateSync;
+use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\EnsureSiteAvailable;
 use Illuminate\Auth\AuthenticationException;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request) => $request->is('api/*') ? null : '/login'
         );
         $middleware->alias([
+            'active' => EnsureActiveUser::class,
             'role' => EnsureRole::class,
             'device' => AuthenticateDevice::class,
             'sync' => AuthenticateSync::class,

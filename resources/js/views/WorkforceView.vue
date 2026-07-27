@@ -41,6 +41,21 @@ const form = reactive({
     face_subject_id: "",
 });
 let attendanceTimer;
+const manilaDateKey = (value = new Date()) => {
+    const date = value instanceof Date ? value : new Date(value);
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-US", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            timeZone: "Asia/Manila",
+        })
+            .formatToParts(date)
+            .map(({ type, value: part }) => [type, part]),
+    );
+
+    return `${parts.year}-${parts.month}-${parts.day}`;
+};
 const matchesSearch = (employee) => `${employee?.name || ""} ${employee?.employee_number || ""} ${employee?.job_title || ""}`.toLowerCase().includes(search.value.trim().toLowerCase());
 const filteredPreview = computed(() => preview.value.filter((row) => matchesSearch(row.employee)));
 const filteredAttendance = computed(() => attendance.value.filter((record) => matchesSearch(record.employee)));
@@ -241,11 +256,10 @@ async function remove(employee) {
 
 function period() {
     const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 6);
+    const start = new Date(end.getTime() - 6 * 24 * 60 * 60 * 1000);
     return {
-        period_start: start.toISOString().slice(0, 10),
-        period_end: end.toISOString().slice(0, 10),
+        period_start: manilaDateKey(start),
+        period_end: manilaDateKey(end),
     };
 }
 
@@ -270,9 +284,18 @@ async function run() {
 async function downloadPayroll() {
     exporting.value = true;
     try {
-        await loadPayroll();
-        await downloadPayrollWorkbook(preview.value, period());
-        message.value = "Payroll Excel workbook downloaded.";
+        const payrollPeriod = period();
+        const { data } = await axios.get("/api/payroll/export-data", {
+            params: payrollPeriod,
+        });
+        await downloadPayrollWorkbook(data.rows, payrollPeriod, {
+            source: data.source,
+            reference: data.reference,
+            finalizedAt: data.finalized_at,
+        });
+        message.value = data.finalized
+            ? "Finalized payroll snapshot downloaded."
+            : "Current payroll preview downloaded.";
     } catch (error) {
         console.error("Payroll workbook export failed", error);
         message.value =
@@ -285,7 +308,7 @@ async function downloadPayroll() {
 async function mark(employee) {
     await axios.post("/api/attendance", {
         employee_id: employee.id,
-        attendance_date: new Date().toISOString().slice(0, 10),
+        attendance_date: manilaDateKey(),
         status: "present",
         recognized_at: new Date().toISOString(),
         match_confidence: 100,
@@ -326,54 +349,6 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
         </div></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
-    <section v-if="tab === 'payroll' && statutoryStatus" class="panel statutory-panel">
-        <div class="panel-head">
-            <div>
-                <span class="eyebrow">Effective-dated payroll standards</span>
-                <h2>Government contribution schedule</h2>
-                <small>Approved standards activate by payroll period and synchronize to the store-local server.</small>
-            </div>
-            <button
-                v-if="auth.role === 'admin'"
-                class="btn tiny"
-                type="button"
-                :disabled="checkingStandards"
-                @click="checkStandards"
-            >
-                {{ checkingStandards ? "Checking official sources…" : "Check official sources" }}
-            </button>
-        </div>
-        <div class="statutory-grid">
-            <article v-for="rate in statutoryStatus.rates" :key="rate.code">
-                <div>
-                    <strong>{{ rate.label }}</strong>
-                    <span class="tag">Current</span>
-                </div>
-                <p>{{ rateSummary(rate) }}</p>
-                <small>{{ rate.revision }} · Effective {{ dateLabel(rate.effective_from) }}</small>
-                <a :href="rate.source_url" target="_blank" rel="noopener noreferrer">View official publication</a>
-            </article>
-        </div>
-        <p
-            class="statutory-monitor"
-            :class="{ warning: statutoryStatus.monitor?.review_required }"
-            role="status"
-        >
-            <strong>{{
-                statutoryStatus.monitor?.review_required
-                    ? "Official-source change detected — review required."
-                    : statutoryStatus.monitor?.automatic_monitoring
-                      ? "Daily source monitoring is enabled."
-                      : "Manual source checking is available."
-            }}</strong>
-            {{
-                statutoryStatus.monitor?.last_checked_at
-                    ? ` Last checked ${dateLabel(statutoryStatus.monitor.last_checked_at)}.`
-                    : " The first automated check will establish the monitoring baseline."
-            }}
-            Approved calculations are never changed silently, and finalized payroll snapshots remain unchanged.
-        </p>
-    </section>
     <section v-if="tab === 'payroll'" class="panel table-wrap">
         <div class="panel-head">
             <div>
@@ -546,6 +521,54 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
                 </tr>
             </tbody>
         </table>
+    </section>
+    <section v-if="tab === 'payroll' && statutoryStatus" class="panel statutory-panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Effective-dated payroll standards</span>
+                <h2>Government contribution schedule</h2>
+                <small>Approved standards activate by payroll period and synchronize to the store-local server.</small>
+            </div>
+            <button
+                v-if="auth.role === 'admin'"
+                class="btn tiny"
+                type="button"
+                :disabled="checkingStandards"
+                @click="checkStandards"
+            >
+                {{ checkingStandards ? "Checking official sources…" : "Check official sources" }}
+            </button>
+        </div>
+        <div class="statutory-grid">
+            <article v-for="rate in statutoryStatus.rates" :key="rate.code">
+                <div>
+                    <strong>{{ rate.label }}</strong>
+                    <span class="tag">Current</span>
+                </div>
+                <p>{{ rateSummary(rate) }}</p>
+                <small>{{ rate.revision }} · Effective {{ dateLabel(rate.effective_from) }}</small>
+                <a :href="rate.source_url" target="_blank" rel="noopener noreferrer">View official publication</a>
+            </article>
+        </div>
+        <p
+            class="statutory-monitor"
+            :class="{ warning: statutoryStatus.monitor?.review_required }"
+            role="status"
+        >
+            <strong>{{
+                statutoryStatus.monitor?.review_required
+                    ? "Official-source change detected — review required."
+                    : statutoryStatus.monitor?.automatic_monitoring
+                      ? "Daily source monitoring is enabled."
+                      : "Manual source checking is available."
+            }}</strong>
+            {{
+                statutoryStatus.monitor?.last_checked_at
+                    ? ` Last checked ${dateLabel(statutoryStatus.monitor.last_checked_at)}.`
+                    : " The first automated check will establish the monitoring baseline."
+            }}
+            Approved calculations are never changed silently, and finalized payroll snapshots remain unchanged.
+        </p>
     </section>
     <div v-if="show" class="modal">
         <form class="modal-card wide" @submit.prevent="save">

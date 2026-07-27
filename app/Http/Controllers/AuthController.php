@@ -155,7 +155,7 @@ class AuthController extends Controller
     {
         $data = $request->validate(['current_password' => 'required|current_password', 'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()]]);
         $request->user()->update(['password' => Hash::make($data['password']), 'password_changed_at' => now(), 'must_change_password' => false]);
-        $outbox->queueUser($request->user()->fresh());
+        $outbox->queueUser($request->user()->fresh(), authorizedBy: $request->user());
 
         return response()->json(['message' => 'Password updated.']);
     }

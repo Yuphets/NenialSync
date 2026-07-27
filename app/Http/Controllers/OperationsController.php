@@ -17,6 +17,8 @@ use App\Services\CompanyBackupService;
 use App\Services\InventoryService;
 use App\Services\OfflineOutboxService;
 use App\Services\PayrollCalculator;
+use App\Services\PayrollSnapshotService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -213,9 +215,23 @@ class OperationsController extends Controller
     public function employeeDestroy(Request $r, Employee $employee, OfflineOutboxService $outbox)
     {
         abort_unless($r->user()->role === 'admin', 403);
-        $employee->update(['is_active' => false]);
-        $employee->delete();
-        $outbox->queueEmployee($employee);
+
+        DB::transaction(function () use ($employee, $outbox) {
+            $enrollments = FaceEnrollment::withTrashed()
+                ->with(['employee', 'device'])
+                ->where('employee_id', $employee->id)
+                ->get();
+
+            foreach ($enrollments as $enrollment) {
+                $enrollment->forceFill(['is_active' => false])->save();
+                $enrollment->delete();
+                $outbox->queueFaceEnrollment($enrollment);
+            }
+
+            $employee->update(['is_active' => false]);
+            $employee->delete();
+            $outbox->queueEmployee($employee);
+        });
 
         return response()->noContent();
     }
@@ -265,62 +281,115 @@ class OperationsController extends Controller
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $d = $r->validate(['period_start' => 'required|date', 'period_end' => 'required|date|after_or_equal:period_start']);
-        abort_if(PayrollRun::whereDate('period_start', $d['period_start'])->whereDate('period_end', $d['period_end'])->exists(), 422, 'This payroll period was already finalized. View it in Reports.');
+        abort_if(
+            PayrollRun::where('status', 'finalized')
+                ->whereDate('period_start', $d['period_start'])
+                ->whereDate('period_end', $d['period_end'])
+                ->exists(),
+            422,
+            'This payroll period was already finalized. View it in Reports.'
+        );
+        $employees = Employee::where('is_active', true)->get();
+        abort_if($employees->isEmpty(), 422, 'Payroll cannot be finalized because there are no active employees.');
         $rates = $calc->rateBundle($d['period_end']);
 
-        return DB::transaction(function () use ($r, $d, $calc, $outbox, $rates) {
-            $run = PayrollRun::create(['reference' => 'PAY-'.now()->format('YmdHis'), 'period_start' => $d['period_start'], 'period_end' => $d['period_end'], 'status' => 'finalized', 'created_by' => $r->user()->id, 'finalized_at' => now()]);
-            foreach (Employee::where('is_active', true)->get() as $e) {
-                $values = $calc->calculate($e, $d['period_end'], $rates);
-                $run->items()->create([
-                    ...$values,
-                    'employee_id' => $e->id,
-                    'calculation' => [
-                        'values' => $values,
-                        'payroll_period_end' => $d['period_end'],
-                        'statutory_rate_catalog' => $rates,
-                    ],
+        try {
+            return DB::transaction(function () use ($r, $d, $calc, $outbox, $rates, $employees) {
+                $run = PayrollRun::create([
+                    'reference' => 'PAY-'.now()->format('YmdHis').'-'.Str::upper(Str::random(4)),
+                    'period_start' => $d['period_start'],
+                    'period_end' => $d['period_end'],
+                    'status' => 'finalized',
+                    'created_by' => $r->user()->id,
+                    'created_by_email' => $r->user()->email,
+                    'created_by_name' => $r->user()->name,
+                    'finalized_at' => now(),
                 ]);
+                foreach ($employees as $e) {
+                    $values = $calc->calculate($e, $d['period_end'], $rates);
+                    $run->items()->create([
+                        ...$values,
+                        'employee_id' => $e->id,
+                        'employee_number' => $e->employee_number,
+                        'employee_name' => $e->name,
+                        'job_title' => $e->job_title,
+                        'calculation' => [
+                            'values' => $values,
+                            'payroll_period_end' => $d['period_end'],
+                            'statutory_rate_catalog' => $rates,
+                        ],
+                    ]);
+                }
+
+                $outbox->queuePayrollRun($run->fresh(['creator', 'items.employee']));
+
+                return $run->load('items.employee');
+            });
+        } catch (QueryException $exception) {
+            if (PayrollRun::where('status', 'finalized')
+                ->whereDate('period_start', $d['period_start'])
+                ->whereDate('period_end', $d['period_end'])->exists()) {
+                abort(422, 'This payroll period was already finalized. View it in Reports.');
             }
 
-            $outbox->queuePayrollRun($run->fresh(['creator', 'items.employee']));
-
-            return $run->load('items.employee');
-        });
+            throw $exception;
+        }
     }
 
     public function payrollRuns()
     {
-        return PayrollRun::with(['creator:id,name', 'items.employee:id,employee_number,name,job_title'])->latest('finalized_at')->paginate(25);
+        return PayrollRun::where('status', 'finalized')
+            ->with(['creator:id,name', 'items.employee:id,employee_number,name,job_title'])
+            ->latest('finalized_at')->paginate(25);
     }
 
-    public function payrollExport(Request $r, PayrollCalculator $calc)
+    public function payrollExport(Request $r, PayrollSnapshotService $snapshots)
     {
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $data = $r->validate([
             'period_start' => 'required|date',
             'period_end' => 'required|date|after_or_equal:period_start',
         ]);
-        $rates = $calc->rateBundle($data['period_end']);
-        $rows = Employee::where('is_active', true)->orderBy('name')->get()
-            ->map(fn ($employee) => [
-                'employee' => $employee,
-                'calculation' => $calc->calculate($employee, $data['period_end'], $rates),
-            ]);
+        $export = $snapshots->export($data['period_start'], $data['period_end']);
+        $rows = $export['rows'];
         $filename = "nenial-payroll-{$data['period_start']}-to-{$data['period_end']}.csv";
 
         return response()->streamDownload(function () use ($rows, $data) {
             $output = fopen('php://output', 'w');
             fputcsv($output, ['Nenial Payroll', $data['period_start'], $data['period_end']]);
             fputcsv($output, []);
-            fputcsv($output, ['Employee No.', 'Employee', 'Job Title', 'Base Pay', 'Incentive', 'Overtime Pay', 'Gross Pay', 'SSS', 'Pag-IBIG', 'PhilHealth', 'Net Pay']);
+            fputcsv($output, ['Employee No.', 'Employee', 'Job Title', 'Base Pay', 'Incentive', 'Overtime Pay', 'Gross Pay', 'SSS', 'Pag-IBIG', 'PhilHealth', 'Other Deductions', 'Net Pay']);
             foreach ($rows as $row) {
                 $employee = $row['employee'];
                 $value = $row['calculation'];
-                fputcsv($output, [$employee->employee_number, $employee->name, $employee->job_title, $value['base_pay'], $value['incentive'], $value['overtime_pay'], $value['gross_pay'], $value['sss'], $value['pagibig'], $value['philhealth'], $value['net_pay']]);
+                fputcsv($output, [
+                    data_get($employee, 'employee_number'),
+                    data_get($employee, 'name'),
+                    data_get($employee, 'job_title'),
+                    $value['base_pay'],
+                    $value['incentive'],
+                    $value['overtime_pay'],
+                    $value['gross_pay'],
+                    $value['sss'],
+                    $value['pagibig'],
+                    $value['philhealth'],
+                    $value['other_deductions'],
+                    $value['net_pay'],
+                ]);
             }
             fclose($output);
         }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    public function payrollExportData(Request $r, PayrollSnapshotService $snapshots)
+    {
+        abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
+        $data = $r->validate([
+            'period_start' => 'required|date',
+            'period_end' => 'required|date|after_or_equal:period_start',
+        ]);
+
+        return $snapshots->export($data['period_start'], $data['period_end']);
     }
 
     public function users(Request $r)
@@ -356,7 +425,7 @@ class OperationsController extends Controller
                 'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
             ]);
         });
-        $outbox->queueUser($user->fresh());
+        $outbox->queueUser($user->fresh(), authorizedBy: $r->user());
 
         return $user->fresh();
     }
@@ -379,7 +448,7 @@ class OperationsController extends Controller
                 'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
             ]);
         });
-        $outbox->queueUser($user->fresh());
+        $outbox->queueUser($user->fresh(), authorizedBy: $r->user());
 
         return response()->noContent();
     }
@@ -400,7 +469,7 @@ class OperationsController extends Controller
                 'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
             ]);
         });
-        $outbox->queueUser($user->fresh());
+        $outbox->queueUser($user->fresh(), authorizedBy: $r->user());
 
         return $user->fresh();
     }
@@ -445,7 +514,7 @@ class OperationsController extends Controller
                 'ip_address' => $r->ip(), 'created_at' => now(), 'updated_at' => now(),
             ]);
         });
-        $outbox->queueUser($user, $originalEmail);
+        $outbox->queueUser($user, $originalEmail, $r->user());
 
         return response()->noContent();
     }
@@ -490,7 +559,7 @@ class OperationsController extends Controller
                 'created_at' => now(), 'updated_at' => now(),
             ]);
         });
-        $outbox->queueUser($user->fresh());
+        $outbox->queueUser($user->fresh(), authorizedBy: $r->user());
 
         return response()->json(['message' => 'Temporary password applied. The user must change it after signing in.']);
     }
@@ -507,6 +576,7 @@ class OperationsController extends Controller
         $attendance = AttendanceRecord::whereBetween('attendance_date', [$from->copy()->toDateString(), $to->copy()->toDateString()]);
         $payrollRuns = PayrollRun::with('creator:id,name')->withCount('items')
             ->withSum('items as gross_pay', 'gross_pay')->withSum('items as net_pay', 'net_pay')
+            ->where('status', 'finalized')
             ->whereDate('period_start', '<=', $to->toDateString())
             ->whereDate('period_end', '>=', $from->toDateString())->latest('finalized_at')->get();
 
@@ -617,6 +687,9 @@ class OperationsController extends Controller
         abort_unless(in_array($device->type, ['facial', 'facial_mobile'], true), 422, 'A facial-recognition device token is required.');
 
         return FaceEnrollment::where('is_active', true)
+            ->whereHas('employee', fn ($query) => $query
+                ->where('is_active', true)
+                ->whereNull('deleted_at'))
             ->orderBy('employee_name')
             ->get(['subject_id', 'employee_name', 'descriptors', 'enrolled_at', 'updated_at']);
     }

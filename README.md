@@ -112,6 +112,8 @@ CACHE_STORE=database
 QUEUE_CONNECTION=database
 SESSION_SECURE_COOKIE=true
 SYNC_SHARED_SECRET=<64-character-random-secret>
+SYNC_PRIVILEGED_SECRET=<different-64-character-random-secret>
+SYNC_ALLOWED_NODE_IDS=store-main
 ```
 
 You may replace the individual `DB_*` values with Neon's pooled `DATABASE_URL`. Nenial recognizes both the current `DATABASE_URL` variable and the legacy Vercel `POSTGRES_URL` variable automatically. During deployment, the Composer `vercel` script validates `APP_KEY` and the database configuration, applies pending migrations, and seeds only a completely new installation. Configuration mistakes therefore fail the deployment build with a useful message instead of producing a generic HTTP 500.
@@ -148,7 +150,7 @@ The cloud deployment remains the online storefront and reporting authority. A st
 
 ### One-time cloud configuration
 
-Generate a long random synchronization secret and add it to the Vercel Production environment as `SYNC_SHARED_SECRET`, then redeploy. Keep this value out of Git and use the same value on the local server.
+Generate two different long random secrets. Add them to the Vercel Production environment as `SYNC_SHARED_SECRET` and `SYNC_PRIVILEGED_SECRET`, set `SYNC_ALLOWED_NODE_IDS=store-main`, then redeploy. Keep both values out of Git and use the same pair on the local server. The shared secret authenticates ordinary replication; the separate privileged secret signs account updates so possession of the ordinary sync token alone cannot create staff accounts, elevate roles, change staff credentials, or disable users. `APP_KEY` is used only as a compatibility fallback when the privileged secret is absent, so explicitly setting `SYNC_PRIVILEGED_SECRET` on both nodes is strongly recommended.
 
 ```powershell
 php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
@@ -165,6 +167,8 @@ LOCAL_DB_PASSWORD=use-a-long-random-password
 LOCAL_NODE_ID=store-main
 CLOUD_URL=https://nenialsync.vercel.app
 SYNC_SHARED_SECRET=the-same-secret-configured-in-vercel
+SYNC_PRIVILEGED_SECRET=the-second-secret-configured-in-vercel
+SYNC_ALLOWED_NODE_IDS=store-main
 ```
 
 Start the local PostgreSQL database, Laravel application, and 30-second synchronization worker:

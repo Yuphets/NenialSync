@@ -997,7 +997,7 @@ onBeforeRouteLeave((to) => (to.path === "/" ? "/app/dashboard" : true));
                 <span class="eyebrow">Nenial Attendance</span>
                 <h1>Facial Recognition Terminal</h1>
             </div>
-            <RouterLink class="btn" to="/">Exit terminal</RouterLink>
+            <RouterLink class="btn" to="/app/dashboard">Exit terminal</RouterLink>
         </header>
         <p class="terminal-status" :class="{ connected }" aria-live="polite">
             {{ status }}

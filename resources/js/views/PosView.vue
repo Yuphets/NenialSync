@@ -271,7 +271,7 @@ async function checkout() {
         ><div class="actions pos-header-actions">
             <span class="live">● Inventory live</span>
             <button
-                v-if="auth.role === 'admin'"
+                v-if="['admin', 'cashier'].includes(auth.role)"
                 class="btn"
                 type="button"
                 :aria-pressed="isFullscreen"
@@ -311,7 +311,27 @@ async function checkout() {
                     <h2>Product library</h2>
                     <small>{{ products.length }} products available</small>
                 </div>
-                <span class="register-state">Register open</span>
+                <div class="pos-panel-actions">
+                    <button
+                        v-if="auth.role === 'cashier'"
+                        class="btn tiny cashier-fullscreen-button"
+                        type="button"
+                        :aria-pressed="isFullscreen"
+                        :aria-label="
+                            isFullscreen
+                                ? 'Exit POS fullscreen'
+                                : 'Open POS fullscreen'
+                        "
+                        @click="toggleFullscreen"
+                    >
+                        {{
+                            isFullscreen
+                                ? "Exit fullscreen"
+                                : "Fullscreen POS"
+                        }}
+                    </button>
+                    <span class="register-state">Register open</span>
+                </div>
             </div>
             <div class="scanner pos-scanner">
                 <label class="scan-field"
@@ -485,6 +505,31 @@ async function checkout() {
 <style scoped>
 .pos-page { min-width: 0; box-sizing: border-box; }
 .pos-header-actions { align-items: center; }
+.pos-panel-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .45rem;
+}
+.cashier-fullscreen-button {
+    min-height: 32px;
+    padding: .35rem .65rem;
+    color: var(--brand);
+    border-color: #bfd8c8;
+    background: #fff;
+    white-space: nowrap;
+}
+.pos-page.pos-focus-active:not(:fullscreen) {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    width: 100vw;
+    height: 100dvh;
+    padding: max(14px, env(safe-area-inset-top)) 14px
+        max(14px, env(safe-area-inset-bottom));
+    overflow: auto;
+    background: var(--page);
+}
 .pos-page:fullscreen {
     width: 100%;
     height: 100dvh;
@@ -525,7 +570,7 @@ async function checkout() {
 .category-strip button.active { border-color: var(--brand); color: #fff; background: var(--brand); }
 .pos-keys {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: minmax(152px, auto);
+    grid-auto-rows: minmax(168px, auto);
     align-content: start;
     flex: 1;
     min-height: 0;
@@ -534,18 +579,35 @@ async function checkout() {
 }
 .pos-keys button {
     position: relative;
-    grid-template-rows: auto minmax(2.6em, auto) minmax(2.7em, auto) auto;
-    align-content: start;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     min-width: 0;
-    min-height: 152px;
+    min-height: 168px;
     padding: 13px;
     overflow: hidden;
 }
 .pos-keys button strong,
-.pos-keys button small { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
-.pos-keys button b { align-self: end; margin-top: auto; }
+.pos-keys button small {
+    display: block;
+    flex: 0 0 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+}
+.pos-keys button b {
+    display: block;
+    flex: 0 0 auto;
+    width: 100%;
+    margin-top: auto;
+    padding-top: 7px;
+    color: var(--brand);
+    font-size: .95rem;
+    line-height: 1.25;
+    white-space: nowrap;
+}
 .pos-keys button:hover:not(:disabled) { border-color: #91bca2; background: #f4faf6; }
-.product-tile-category { color: var(--muted); font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.product-tile-category { flex: 0 0 auto; color: var(--muted); font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .product-empty { grid-column: 1 / -1; }
 .sale-ticket { display: flex; flex-direction: column; min-width: 0; }
 .ticket-head { padding: 17px 20px; }
@@ -697,12 +759,12 @@ async function checkout() {
         padding: 0.38rem 0.62rem;
     }
     .cashier-pos .pos-keys {
-        grid-auto-rows: minmax(116px, auto);
+        grid-auto-rows: minmax(148px, auto);
         gap: 7px;
         padding: 9px;
     }
     .cashier-pos .pos-keys button {
-        min-height: 116px;
+        min-height: 148px;
         padding: 10px;
     }
     .cashier-pos .ticket-head {
@@ -756,6 +818,9 @@ async function checkout() {
     }
 }
 @media (max-width: 1240px) {
+    .cashier-fullscreen-button {
+        display: none;
+    }
     .pos-mobile-tabs {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -49,7 +49,7 @@ Route::prefix('api')->middleware('site.available')->group(function () {
         Route::post('/sync/maintenance', [CloudSyncController::class, 'maintenance']);
     });
 
-    Route::middleware('auth')->group(function () {
+    Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::put('/auth/password', [AuthController::class, 'password']);
@@ -93,11 +93,14 @@ Route::prefix('api')->middleware('site.available')->group(function () {
         Route::post('/payroll/runs', [OperationsController::class, 'payrollRun'])->middleware('role:admin,assistant');
         Route::get('/payroll/runs', [OperationsController::class, 'payrollRuns'])->middleware('role:admin,assistant');
         Route::get('/payroll/export', [OperationsController::class, 'payrollExport'])->middleware('role:admin,assistant');
+        Route::get('/payroll/export-data', [OperationsController::class, 'payrollExportData'])->middleware('role:admin,assistant');
         Route::get('/statutory-rates', [StatutoryRateController::class, 'index'])->middleware('role:admin,assistant');
         Route::post('/admin/statutory-rates/check', [StatutoryRateController::class, 'check'])->middleware(['role:admin', 'throttle:3,10']);
         Route::get('/reports', [OperationsController::class, 'report'])->middleware('role:admin,assistant');
         Route::get('/local-sync/status', [LocalSyncController::class, 'status'])->middleware('role:admin,assistant');
         Route::post('/local-sync/run', [LocalSyncController::class, 'run'])->middleware('role:admin,assistant');
+        Route::get('/local-sync/conflicts', [LocalSyncController::class, 'conflicts'])->middleware('role:admin');
+        Route::post('/local-sync/conflicts/{syncConflict}/resolve', [LocalSyncController::class, 'resolveConflict'])->middleware('role:admin');
     });
 });
 
