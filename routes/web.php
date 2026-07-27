@@ -7,7 +7,11 @@ use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\StatutoryRateController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/api/cron/statutory-rates', [StatutoryRateController::class, 'cron'])
+    ->middleware('throttle:6,1');
 
 Route::prefix('api')->middleware('site.available')->group(function () {
     Route::get('/system/status', [MaintenanceController::class, 'status']);
@@ -89,6 +93,8 @@ Route::prefix('api')->middleware('site.available')->group(function () {
         Route::post('/payroll/runs', [OperationsController::class, 'payrollRun'])->middleware('role:admin,assistant');
         Route::get('/payroll/runs', [OperationsController::class, 'payrollRuns'])->middleware('role:admin,assistant');
         Route::get('/payroll/export', [OperationsController::class, 'payrollExport'])->middleware('role:admin,assistant');
+        Route::get('/statutory-rates', [StatutoryRateController::class, 'index'])->middleware('role:admin,assistant');
+        Route::post('/admin/statutory-rates/check', [StatutoryRateController::class, 'check'])->middleware(['role:admin', 'throttle:3,10']);
         Route::get('/reports', [OperationsController::class, 'report'])->middleware('role:admin,assistant');
         Route::get('/local-sync/status', [LocalSyncController::class, 'status'])->middleware('role:admin,assistant');
         Route::post('/local-sync/run', [LocalSyncController::class, 'run'])->middleware('role:admin,assistant');

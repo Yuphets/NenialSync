@@ -15,6 +15,8 @@ const message = ref("");
 const show = ref(false);
 const saving = ref(null);
 const exporting = ref(false);
+const checkingStandards = ref(false);
+const statutoryStatus = ref(null);
 const search = ref("");
 const payrollPage = ref(1);
 const payrollPageSize = ref(5);
@@ -56,18 +58,60 @@ const pagedAttendance = computed(() =>
 );
 
 async function loadPayroll() {
-    const [employeeResponse, previewResponse] = await Promise.all([
+    const [employeeResponse, previewResponse, statutoryResponse] = await Promise.all([
         axios.get("/api/employees", { params: { _: Date.now() } }),
         axios.get("/api/payroll/preview", { params: { _: Date.now() } }),
+        axios.get("/api/statutory-rates", { params: { _: Date.now() } }),
     ]);
     employees.value = employeeResponse.data;
     preview.value = previewResponse.data;
+    statutoryStatus.value = statutoryResponse.data;
     for (const employee of employees.value) {
         deductionDrafts[employee.id] = [
             ...(employee.deduction_plan ?? deductions.map((item) => item.code)),
         ];
         incentiveDrafts[employee.id] = Number(employee.incentive || 0);
     }
+}
+
+async function checkStandards() {
+    checkingStandards.value = true;
+    try {
+        statutoryStatus.value = (
+            await axios.post("/api/admin/statutory-rates/check")
+        ).data;
+        message.value = statutoryStatus.value.monitor?.review_required
+            ? "An official source changed. Review the new publication before finalizing payroll."
+            : "Official payroll sources checked. No source change was detected.";
+    } catch (error) {
+        message.value =
+            error.response?.data?.message ||
+            "The official sources could not be checked right now. Existing approved rates were not changed.";
+    } finally {
+        checkingStandards.value = false;
+    }
+}
+
+function rateSummary(rate) {
+    const rules = rate.rules || {};
+    if (rate.code === "sss")
+        return `${Number(rules.employee_rate * 100)}% employee share · ₱${Number(rules.min_credit).toLocaleString("en-PH")}–₱${Number(rules.max_credit).toLocaleString("en-PH")} MSC`;
+    if (rate.code === "pagibig")
+        return `${Number(rules.low_income_rate * 100)}% / ${Number(rules.employee_rate * 100)}% employee share · ₱${Number(rules.max_salary).toLocaleString("en-PH")} cap`;
+    return `${Number(rules.total_rate * 100)}% total, equally shared · ₱${Number(rules.min_salary).toLocaleString("en-PH")}–₱${Number(rules.max_salary).toLocaleString("en-PH")} salary base`;
+}
+
+function dateLabel(value) {
+    if (!value) return "Not recorded";
+    const date = new Date(value.includes?.("T") ? value : `${value}T00:00:00+08:00`);
+    return Number.isNaN(date.getTime())
+        ? value
+        : date.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              timeZone: "Asia/Manila",
+          });
 }
 
 async function load() {
@@ -282,6 +326,54 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
         </div></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
+    <section v-if="tab === 'payroll' && statutoryStatus" class="panel statutory-panel">
+        <div class="panel-head">
+            <div>
+                <span class="eyebrow">Effective-dated payroll standards</span>
+                <h2>Government contribution schedule</h2>
+                <small>Approved standards activate by payroll period and synchronize to the store-local server.</small>
+            </div>
+            <button
+                v-if="auth.role === 'admin'"
+                class="btn tiny"
+                type="button"
+                :disabled="checkingStandards"
+                @click="checkStandards"
+            >
+                {{ checkingStandards ? "Checking official sources…" : "Check official sources" }}
+            </button>
+        </div>
+        <div class="statutory-grid">
+            <article v-for="rate in statutoryStatus.rates" :key="rate.code">
+                <div>
+                    <strong>{{ rate.label }}</strong>
+                    <span class="tag">Current</span>
+                </div>
+                <p>{{ rateSummary(rate) }}</p>
+                <small>{{ rate.revision }} · Effective {{ dateLabel(rate.effective_from) }}</small>
+                <a :href="rate.source_url" target="_blank" rel="noopener noreferrer">View official publication</a>
+            </article>
+        </div>
+        <p
+            class="statutory-monitor"
+            :class="{ warning: statutoryStatus.monitor?.review_required }"
+            role="status"
+        >
+            <strong>{{
+                statutoryStatus.monitor?.review_required
+                    ? "Official-source change detected — review required."
+                    : statutoryStatus.monitor?.automatic_monitoring
+                      ? "Daily source monitoring is enabled."
+                      : "Manual source checking is available."
+            }}</strong>
+            {{
+                statutoryStatus.monitor?.last_checked_at
+                    ? ` Last checked ${dateLabel(statutoryStatus.monitor.last_checked_at)}.`
+                    : " The first automated check will establish the monitoring baseline."
+            }}
+            Approved calculations are never changed silently, and finalized payroll snapshots remain unchanged.
+        </p>
+    </section>
     <section v-if="tab === 'payroll'" class="panel table-wrap">
         <div class="panel-head">
             <div>
@@ -509,5 +601,24 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
 .deduction-breakdown { display: grid; gap: .3rem; min-width: 145px; }
 .deduction-breakdown span { display: flex; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: .74rem; }
 .deduction-breakdown b { color: var(--ink); }
-@media (max-width: 700px) { .workforce-search { width: 100%; } }
+.statutory-panel { overflow: hidden; }
+.statutory-panel .panel-head > div { display: grid; gap: .25rem; }
+.statutory-panel .panel-head small { color: var(--muted); line-height: 1.45; }
+.statutory-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 16px 18px; }
+.statutory-grid article { display: grid; gap: .5rem; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f9fcfa; }
+.statutory-grid article > div { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.statutory-grid article p { margin: 0; line-height: 1.45; }
+.statutory-grid article small { color: var(--muted); }
+.statutory-grid article a { width: max-content; max-width: 100%; color: var(--brand); font-size: .76rem; font-weight: 750; overflow-wrap: anywhere; }
+.statutory-monitor { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); color: var(--muted); background: #fbfdfc; font-size: .76rem; line-height: 1.5; }
+.statutory-monitor strong { color: var(--brand); }
+.statutory-monitor.warning { color: #654700; background: #fff5d8; }
+.statutory-monitor.warning strong { color: #8a5c00; }
+@media (max-width: 1000px) { .statutory-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+    .workforce-search { width: 100%; }
+    .statutory-panel .panel-head { align-items: stretch; flex-direction: column; }
+    .statutory-panel .panel-head .btn { width: 100%; }
+    .statutory-grid { padding: 12px; }
+}
 </style>

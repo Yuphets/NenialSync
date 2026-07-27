@@ -31,7 +31,7 @@
         <h1>Currently under maintenance</h1>
         <p>{{ $maintenance['message'] }}</p>
         <div class="status">Service temporarily unavailable</div>
-        <div><a href="/login?maintenance=1">Administrator access</a></div>
+        <div><a href="/login?maintenance=1">Log in</a></div>
         <small>Store services will return as soon as maintenance is complete.</small>
     </article>
 </main>

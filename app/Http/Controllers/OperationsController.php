@@ -7,23 +7,22 @@ use App\Models\Device;
 use App\Models\Employee;
 use App\Models\FaceEnrollment;
 use App\Models\Order;
-use App\Models\PayrollItem;
-use App\Models\PayrollRun;
 use App\Models\PasswordResetTicket;
+use App\Models\PayrollRun;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SyncState;
 use App\Models\User;
+use App\Services\CompanyBackupService;
 use App\Services\InventoryService;
 use App\Services\OfflineOutboxService;
 use App\Services\PayrollCalculator;
-use App\Services\CompanyBackupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 
 class OperationsController extends Controller
 {
@@ -194,6 +193,7 @@ class OperationsController extends Controller
             $employee = Employee::create($data);
         }
         $outbox->queueEmployee($employee);
+
         return response()->json($employee->fresh(), $employee->wasRecentlyCreated ? 201 : 200);
     }
 
@@ -248,9 +248,17 @@ class OperationsController extends Controller
         });
     }
 
-    public function payrollPreview(PayrollCalculator $calc)
+    public function payrollPreview(Request $request, PayrollCalculator $calc)
     {
-        return Employee::where('is_active', true)->get()->map(fn ($e) => ['employee' => $e, 'calculation' => $calc->calculate($e)]);
+        $data = $request->validate(['as_of' => 'nullable|date']);
+        $asOf = $data['as_of'] ?? now(config('app.timezone'))->toDateString();
+        $rates = $calc->rateBundle($asOf);
+
+        return Employee::where('is_active', true)->get()
+            ->map(fn ($employee) => [
+                'employee' => $employee,
+                'calculation' => $calc->calculate($employee, $asOf, $rates),
+            ]);
     }
 
     public function payrollRun(Request $r, PayrollCalculator $calc, OfflineOutboxService $outbox)
@@ -258,12 +266,21 @@ class OperationsController extends Controller
         abort_unless($r->user()->isOneOf('admin', 'assistant'), 403);
         $d = $r->validate(['period_start' => 'required|date', 'period_end' => 'required|date|after_or_equal:period_start']);
         abort_if(PayrollRun::whereDate('period_start', $d['period_start'])->whereDate('period_end', $d['period_end'])->exists(), 422, 'This payroll period was already finalized. View it in Reports.');
+        $rates = $calc->rateBundle($d['period_end']);
 
-        return DB::transaction(function () use ($r, $d, $calc, $outbox) {
+        return DB::transaction(function () use ($r, $d, $calc, $outbox, $rates) {
             $run = PayrollRun::create(['reference' => 'PAY-'.now()->format('YmdHis'), 'period_start' => $d['period_start'], 'period_end' => $d['period_end'], 'status' => 'finalized', 'created_by' => $r->user()->id, 'finalized_at' => now()]);
             foreach (Employee::where('is_active', true)->get() as $e) {
-                $values = $calc->calculate($e);
-                $run->items()->create([...$values, 'employee_id' => $e->id, 'calculation' => $values]);
+                $values = $calc->calculate($e, $d['period_end'], $rates);
+                $run->items()->create([
+                    ...$values,
+                    'employee_id' => $e->id,
+                    'calculation' => [
+                        'values' => $values,
+                        'payroll_period_end' => $d['period_end'],
+                        'statutory_rate_catalog' => $rates,
+                    ],
+                ]);
             }
 
             $outbox->queuePayrollRun($run->fresh(['creator', 'items.employee']));
@@ -284,8 +301,12 @@ class OperationsController extends Controller
             'period_start' => 'required|date',
             'period_end' => 'required|date|after_or_equal:period_start',
         ]);
+        $rates = $calc->rateBundle($data['period_end']);
         $rows = Employee::where('is_active', true)->orderBy('name')->get()
-            ->map(fn ($employee) => ['employee' => $employee, 'calculation' => $calc->calculate($employee)]);
+            ->map(fn ($employee) => [
+                'employee' => $employee,
+                'calculation' => $calc->calculate($employee, $data['period_end'], $rates),
+            ]);
         $filename = "nenial-payroll-{$data['period_start']}-to-{$data['period_end']}.csv";
 
         return response()->streamDownload(function () use ($rows, $data) {
@@ -563,13 +584,16 @@ class OperationsController extends Controller
             ]) === 1;
             $record = AttendanceRecord::where('employee_id', $employee->id)->whereDate('attendance_date', $at->toDateString())->firstOrFail();
             $record->setAttribute('was_recently_created_by_device', $created);
-            if ($created) $outbox->queueAttendance($record);
+            if ($created) {
+                $outbox->queueAttendance($record);
+            }
 
             return $record;
         });
 
         $created = (bool) $record->getAttribute('was_recently_created_by_device');
         $record->offsetUnset('was_recently_created_by_device');
+
         return response()->json([...$record->toArray(), 'already_recorded' => ! $created], $created ? 201 : 200);
     }
 

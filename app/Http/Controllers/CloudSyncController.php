@@ -10,11 +10,13 @@ use App\Models\Order;
 use App\Models\PayrollRun;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\StatutoryRate;
 use App\Models\SyncReceipt;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\InventoryService;
 use App\Services\MaintenanceModeService;
+use App\Services\StatutoryRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -142,8 +144,26 @@ class CloudSyncController extends Controller
     public function configuration()
     {
         return [
-            'capabilities' => ['device_sync' => true, 'maintenance_sync' => true],
+            'capabilities' => ['device_sync' => true, 'maintenance_sync' => true, 'statutory_rate_sync' => true],
             'maintenance' => app(MaintenanceModeService::class)->status(),
+            'statutory_rate_monitor' => app(StatutoryRateService::class)->monitorStatus(),
+            'statutory_rates' => StatutoryRate::query()
+                ->orderBy('code')
+                ->orderBy('effective_from')
+                ->get()
+                ->map(fn (StatutoryRate $rate) => [
+                    ...$rate->only([
+                        'code', 'agency', 'revision', 'status', 'rules',
+                        'source_title', 'source_url', 'rules_checksum',
+                    ]),
+                    'effective_from' => $rate->effective_from?->toDateString(),
+                    'effective_to' => $rate->effective_to?->toDateString(),
+                    'published_at' => $rate->published_at?->toDateString(),
+                    'verified_at' => $rate->verified_at?->toIso8601String(),
+                    'approved_at' => $rate->approved_at?->toIso8601String(),
+                    'created_at' => $rate->created_at?->toIso8601String(),
+                    'updated_at' => $rate->updated_at?->toIso8601String(),
+                ]),
             'users' => User::withTrashed()->orderBy('email')->get()->map(fn (User $user) => [
                 'name' => $user->name, 'email' => $user->email,
                 'password_hash' => $user->getRawOriginal('password'), 'role' => $user->role,

@@ -9,6 +9,7 @@ use App\Models\FaceEnrollment;
 use App\Models\Order;
 use App\Models\PayrollRun;
 use App\Models\Product;
+use App\Models\StatutoryRate;
 use App\Models\SyncConflict;
 use App\Models\SyncOutbox;
 use App\Models\SyncState;
@@ -25,6 +26,7 @@ class LocalSyncService
     public function __construct(
         private readonly OfflineOutboxService $outbox,
         private readonly MaintenanceModeService $maintenance,
+        private readonly StatutoryRateService $statutoryRates,
     ) {}
 
     public function run(): array
@@ -163,13 +165,14 @@ class LocalSyncService
                 'orders_synced' => false,
                 'attendance_synced' => false,
                 'payroll_synced' => false,
+                'statutory_rates_synced' => false,
                 'last_error' => $exception->getMessage(),
             ]);
 
             return $this->status(false, $synced, $conflicts, 'Cloud refresh failed while importing data: '.$exception->getMessage());
         }
 
-        $this->rememberCloudState(['products' => count($productPayload), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync && data_get($configurationPayload, 'capabilities.device_sync', false), 'face_enrollments_synced' => $accountSync && array_key_exists('face_enrollments', $configurationPayload), 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync, 'last_error' => null]);
+        $this->rememberCloudState(['products' => count($productPayload), 'accounts_synced' => $accountSync, 'devices_synced' => $accountSync && data_get($configurationPayload, 'capabilities.device_sync', false), 'face_enrollments_synced' => $accountSync && array_key_exists('face_enrollments', $configurationPayload), 'statutory_rates_synced' => $accountSync && data_get($configurationPayload, 'capabilities.statutory_rate_sync', false) && array_key_exists('statutory_rates', $configurationPayload), 'activity_synced' => $activitySync, 'orders_synced' => $orderSync, 'attendance_synced' => $attendanceSync, 'payroll_synced' => $payrollSync, 'last_error' => null]);
         if ($activitySync) {
             SyncState::updateOrCreate(['key' => 'cloud_inventory_activity'], ['value' => ['movements' => $activity->json()], 'last_synced_at' => now()]);
         }
@@ -207,6 +210,7 @@ class LocalSyncService
             'orders_synced' => (bool) data_get($cloudValue, 'orders_synced', false),
             'attendance_synced' => (bool) data_get($cloudValue, 'attendance_synced', false),
             'payroll_synced' => (bool) data_get($cloudValue, 'payroll_synced', false),
+            'statutory_rates_synced' => (bool) data_get($cloudValue, 'statutory_rates_synced', false),
             'message' => $message ?: data_get($cloudValue, 'last_error'),
         ];
     }
@@ -256,6 +260,38 @@ class LocalSyncService
     {
         if (isset($configuration['maintenance']) && is_array($configuration['maintenance'])) {
             $this->maintenance->applyRemote($configuration['maintenance']);
+        }
+        if (isset($configuration['statutory_rate_monitor']) && is_array($configuration['statutory_rate_monitor'])) {
+            $this->statutoryRates->applyRemoteMonitor($configuration['statutory_rate_monitor']);
+        }
+
+        if (array_key_exists('statutory_rates', $configuration)) {
+            $remoteRates = collect($configuration['statutory_rates'])
+                ->filter(fn ($rate) => is_array($rate) && isset($rate['code'], $rate['effective_from'], $rate['rules']))
+                ->values();
+            $remoteRateKeys = $remoteRates
+                ->map(fn (array $rate) => $rate['code'].'|'.$rate['effective_from'])
+                ->all();
+
+            foreach ($remoteRates as $remote) {
+                $rate = StatutoryRate::query()->firstOrNew([
+                    'code' => $remote['code'],
+                    'effective_from' => $remote['effective_from'],
+                ]);
+                $rate->forceFill(collect($remote)->only([
+                    'agency', 'revision', 'status', 'effective_to', 'rules',
+                    'source_title', 'source_url', 'published_at', 'verified_at',
+                    'approved_at', 'rules_checksum', 'created_at', 'updated_at',
+                ])->all())->save();
+            }
+
+            StatutoryRate::query()->get()
+                ->reject(fn (StatutoryRate $rate) => in_array(
+                    $rate->code.'|'.$rate->effective_from?->toDateString(),
+                    $remoteRateKeys,
+                    true,
+                ))
+                ->each(fn (StatutoryRate $rate) => $rate->update(['status' => 'superseded']));
         }
 
         $remoteUsers = collect($configuration['users'] ?? [])

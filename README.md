@@ -224,6 +224,20 @@ An active Admin can open **Settings → Maintenance mode** to temporarily close 
 
 The application database and session database must remain reachable for administrator recovery. Infrastructure-level database outages still require recovery through Neon/PostgreSQL and the deployment platform.
 
+## Statutory payroll standards
+
+Payroll uses an approved, effective-dated catalog for SSS, Pag-IBIG, and PhilHealth. The Workforce page shows the active revision, effective date, current calculation limits, verification date, and a direct link to the official publication. Finalization resolves the catalog using the payroll period end date and stores the complete applied rules and checksum with every immutable payroll snapshot. A later standard therefore changes future payroll only; it does not rewrite a finalized run.
+
+The catalog currently contains:
+
+- SSS Circular 2024-006, effective January 1, 2025: 5% employee share and a PHP 5,000–35,000 Monthly Salary Credit.
+- Pag-IBIG Circular 460, effective February 1, 2024: 1%/2% employee rates and a PHP 10,000 maximum Fund Salary.
+- PhilHealth Premium Advisory 2025-0002: 5% total premium, shared equally, using the PHP 10,000–100,000 salary band. No superseding 2026 premium-rate issuance was located as of July 27, 2026.
+
+Vercel runs `/api/cron/statutory-rates` daily at 08:30 Philippine time. Add a random `CRON_SECRET` of at least 16 characters to the Vercel Production environment; Vercel sends it as a Bearer token automatically. An Admin can also select **Check official sources** in Workforce. The monitor fingerprints official agency publication pages and raises **Review required** if a source changes.
+
+SSS, Pag-IBIG, and PhilHealth do not publish one documented machine-readable rate API. For payroll safety, a changed webpage or PDF is never interpreted and activated silently. Have the company accountant verify a new circular/advisory, add it as a new approved effective-dated catalog revision, and test its boundary values. Scheduled approved revisions activate automatically on their effective date and synchronize to the Docker store node through the existing authenticated cloud configuration channel.
+
 ## Facial-recognition terminal setup
 
 Nenial includes a browser-based attendance terminal. Raw images are not stored. Numerical face descriptors are shared through the application database so authorized online and store-local terminals use the same enrollment set. Attendance events contain the subject identifier, event ID, timestamp, and confidence.
@@ -298,4 +312,4 @@ The feature suite covers stock deduction, online reservations, receipt settlemen
 - Review Vercel runtime logs and Neon query metrics.
 - Validate statutory payroll rates with the responsible accountant before every effective-period change.
 
-Payroll selects the newest `statutory_rates` row whose `effective_from` date has begun. The seeded 2025 SSS and PhilHealth parameters follow the published [SSS contribution guidance](https://www.sss.gov.ph/pay-contribution/) and [PhilHealth 2025 advisory](https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf); an accountant should still approve each new effective row before payroll is finalized.
+Payroll selects the newest approved `statutory_rates` row valid on the payroll period end date, including its optional `effective_to` boundary. Official-source monitoring identifies publications that need review; an accountant must approve the actual new rules before they can affect payroll.

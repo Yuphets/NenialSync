@@ -1,13 +1,15 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import axios from "axios";
-import { RouterLink, RouterView, useRouter } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 const isCashier = computed(() => auth.role === "cashier");
 const sidebarCollapsed = ref(readSidebarPreference());
+const navigation = ref(null);
 const maintenance = ref(null);
 const links = computed(() =>
     [
@@ -62,6 +64,14 @@ function maintenanceChanged(event) {
     maintenance.value = event.detail;
 }
 
+function revealActiveNavigation() {
+    nextTick(() => {
+        navigation.value
+            ?.querySelector(".router-link-active")
+            ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+}
+
 async function logout() {
     await auth.logout();
     router.push("/");
@@ -69,8 +79,10 @@ async function logout() {
 
 onMounted(() => {
     loadMaintenance();
+    revealActiveNavigation();
     window.addEventListener("nenial:maintenance-changed", maintenanceChanged);
 });
+watch(() => route.fullPath, revealActiveNavigation, { flush: "post" });
 onBeforeUnmount(() =>
     window.removeEventListener(
         "nenial:maintenance-changed",
@@ -130,7 +142,7 @@ onBeforeUnmount(() =>
                 <span>{{ auth.user.email }}</span>
                 <b>{{ auth.role }}</b>
             </div>
-            <nav>
+            <nav ref="navigation">
                 <RouterLink
                     v-for="link in links"
                     :key="link[1]"

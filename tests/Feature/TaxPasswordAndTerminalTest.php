@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Device;
 use App\Models\Employee;
+use App\Models\PasswordResetTicket;
 use App\Models\Product;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
@@ -45,7 +46,7 @@ class TaxPasswordAndTerminalTest extends TestCase
         $customer = User::factory()->create(['role' => 'user', 'is_active' => true]);
         $ticket = $this->postJson('/api/auth/password-tickets', ['email' => $customer->email, 'reason' => 'Forgot password'])
             ->assertAccepted()->json('ticket_number');
-        $ticketId = \App\Models\PasswordResetTicket::where('ticket_number', $ticket)->value('id');
+        $ticketId = PasswordResetTicket::where('ticket_number', $ticket)->value('id');
 
         $this->actingAs($admin)->postJson("/api/users/{$customer->id}/password-reset", [
             'ticket_id' => $ticketId, 'current_password' => 'AdminCurrent2026!',
@@ -78,6 +79,12 @@ class TaxPasswordAndTerminalTest extends TestCase
     {
         config(['offline.sync_token' => 'test-sync-secret']);
         $this->withToken('test-sync-secret')->getJson('/api/sync/configuration')->assertOk()
-            ->assertJsonStructure(['users' => [['email', 'password_hash', 'role']], 'employees', 'devices']);
+            ->assertJsonStructure([
+                'users' => [['email', 'password_hash', 'role']],
+                'employees',
+                'devices',
+                'statutory_rates' => [['code', 'effective_from', 'rules', 'source_url']],
+                'statutory_rate_monitor',
+            ]);
     }
 }

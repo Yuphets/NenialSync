@@ -100,6 +100,8 @@ class MaintenanceModeTest extends TestCase
         $this->get('/')
             ->assertStatus(503)
             ->assertSee('Currently under maintenance')
+            ->assertSee('Log in')
+            ->assertDontSee('Administrator access')
             ->assertHeader('X-Nenial-Maintenance', '1');
         $this->get('/login')->assertOk();
         $this->get('/face-terminal')->assertOk();

@@ -9,6 +9,12 @@
       "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/statutory-rates",
+      "schedule": "30 0 * * *"
+    }
+  ],
   "routes": [
     { "src": "/build/(.*)", "dest": "/public/build/$1" },
     { "src": "/media/(.*)", "dest": "/public/media/$1" },

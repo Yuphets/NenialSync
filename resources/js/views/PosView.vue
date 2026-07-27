@@ -113,6 +113,15 @@ function syncFullscreenState() {
     const active = document.fullscreenElement === posRoot.value;
     isFullscreen.value = active;
     document.body.classList.toggle("pos-focus-mode", active);
+    if (active) resetPosViewport();
+}
+
+function resetPosViewport() {
+    window.requestAnimationFrame(() => {
+        if (!posRoot.value) return;
+        posRoot.value.scrollTop = 0;
+        posRoot.value.scrollLeft = 0;
+    });
 }
 
 async function toggleFullscreen() {
@@ -128,6 +137,7 @@ async function toggleFullscreen() {
                 "pos-focus-mode",
                 isFullscreen.value,
             );
+            if (isFullscreen.value) resetPosViewport();
             return;
         }
 
@@ -473,17 +483,23 @@ async function checkout() {
 </template>
 
 <style scoped>
-.pos-page { min-width: 0; }
+.pos-page { min-width: 0; box-sizing: border-box; }
 .pos-header-actions { align-items: center; }
 .pos-page:fullscreen {
     width: 100%;
     height: 100dvh;
-    padding: 14px;
+    padding: max(14px, env(safe-area-inset-top)) 14px 14px;
     overflow-y: auto;
     background: var(--page);
 }
-.pos-page:fullscreen > .page-header {
-    margin-bottom: 12px;
+.pos-page:fullscreen > .page-header,
+.pos-page.pos-focus-active > .page-header {
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 64px;
+    margin: 0 auto 12px;
+    padding-top: 2px;
+    align-items: center;
 }
 .pos-mobile-tabs { display: none; }
 .pos-workstation {
@@ -560,9 +576,12 @@ async function checkout() {
     .pos-page.pos-focus-active {
         display: flex;
         flex-direction: column;
+        width: 100%;
         height: 100dvh;
         min-height: 0;
+        padding: max(14px, env(safe-area-inset-top)) 14px 14px;
         overflow: hidden;
+        box-sizing: border-box;
     }
     .pos-page.pos-focus-active > .page-header,
     .pos-page.pos-focus-active > .notice {

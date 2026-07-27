@@ -6,7 +6,6 @@ use App\Models\Employee;
 use App\Models\Product;
 use App\Models\User;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
@@ -38,9 +37,6 @@ class DatabaseSeeder extends Seeder
         $employees = [['EMP-1001', 'Ramon Dela Cruz', 'Mason', 5100, 'FACE-1001'], ['EMP-1002', 'Jun Ortega', 'Carpenter', 5600, 'FACE-1002'], ['EMP-1003', 'Lito Garcia', 'Steelman', 5520, 'FACE-1003'], ['EMP-1004', 'Mark Villanueva', 'Painter', 4800, 'FACE-1004'], ['EMP-1005', 'Edwin Salazar', 'Tile Setter', 6200, 'FACE-1005'], ['EMP-1006', 'Paolo Manalo', 'Helper Laborer', 3900, 'FACE-1006']];
         foreach ($employees as [$number,$name,$title,$salary,$face]) {
             Employee::updateOrCreate(['employee_number' => $number], ['name' => $name, 'job_title' => $title, 'weekly_salary' => $salary, 'overtime_hourly_rate' => round($salary / 48 * 1.25, 2), 'deduction_plan' => ['sss', 'pagibig', 'philhealth'], 'face_subject_id' => $face, 'is_active' => true]);
-        }
-        foreach (['sss' => ['employee_rate' => .05, 'min_credit' => 5000, 'max_credit' => 35000], 'pagibig' => ['employee_rate' => .02, 'max_salary' => 10000], 'philhealth' => ['total_rate' => .05, 'employee_share' => .5, 'min_salary' => 10000, 'max_salary' => 100000]] as $code => $rules) {
-            DB::table('statutory_rates')->updateOrInsert(['code' => $code, 'effective_from' => '2025-01-01'], ['rules' => json_encode($rules), 'created_at' => now(), 'updated_at' => now()]);
         }
     }
 }
