@@ -104,9 +104,36 @@ class OperationsController extends Controller
     public function pos(Request $r, InventoryService $s)
     {
         abort_unless($r->user()->isOneOf('admin', 'cashier'), 403);
-        $d = $r->validate(['items' => 'required|array|min:1', 'items.*.product_id' => 'required|integer', 'items.*.quantity' => 'required|integer|min:1', 'payment_method' => 'required|string|max:40', 'discount_percent' => 'nullable|numeric|min:0|max:100', 'idempotency_key' => 'required|uuid']);
+        $d = $r->validate([
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|integer',
+            'items.*.quantity' => 'required|integer|min:1',
+            'payment_method' => 'required|in:cash,card,gcash,paymaya',
+            'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'amount_tendered' => 'nullable|numeric|min:0|max:999999999999.99',
+            'idempotency_key' => 'required|uuid',
+        ]);
 
-        return response()->json($s->completeSale($r->user(), $d['items'], $d['payment_method'], (float) ($d['discount_percent'] ?? 0), $d['idempotency_key']), 201);
+        $sale = $s->completeSale(
+            $r->user(),
+            $d['items'],
+            $d['payment_method'],
+            (float) ($d['discount_percent'] ?? 0),
+            $d['idempotency_key'],
+            isset($d['amount_tendered']) ? (float) $d['amount_tendered'] : null,
+        );
+
+        return response()->json([
+            ...$sale->toArray(),
+            'receipt_profile' => [
+                'business_name' => config('receipt.business_name'),
+                'address' => config('receipt.address'),
+                'contact' => config('receipt.contact'),
+                'tin' => config('receipt.tin'),
+                'footer' => config('receipt.footer'),
+                'legal_note' => config('receipt.legal_note'),
+            ],
+        ], 201);
     }
 
     public function sales()

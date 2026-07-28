@@ -144,6 +144,18 @@ Customer accounts should be created through the public sign-up flow so email ver
 
 Test ten repeated scans before opening the register. A scan must resolve exactly one SKU and must never add beyond `available_quantity`.
 
+### Thermal receipt setup
+
+The POS prepares a print-only receipt after every successful sale. **Print receipt automatically** is enabled by default; the cashier can choose 80 mm or 58 mm paper and can reprint the most recent receipt during the current browser session. Cash sales require the amount received and show the calculated change before checkout. The saved sale and its offline synchronization event retain the tendered amount and change.
+
+1. Install the thermal printer using its Windows driver and print a Windows test page.
+2. In the POS, select the matching **80 mm** or **58 mm** paper width.
+3. Complete a test sale and choose the thermal printer in the browser print dialog.
+4. Set margins to **None**, scale to **100%**, and disable browser headers and footers.
+5. Save the printer as the browser's most recently used destination.
+
+Normal browsers show a print confirmation dialog for security. A dedicated counter computer may use the browser's managed kiosk-printing option when the business requires unattended printing; restrict that computer to the POS and configure the printer through the operating system. Before customer use, set `RECEIPT_BUSINESS_NAME`, `RECEIPT_ADDRESS`, `RECEIPT_CONTACT`, `RECEIPT_TIN`, `RECEIPT_FOOTER`, and `RECEIPT_LEGAL_NOTE` to the registered business details. Printing a system transaction copy does not by itself make the application a government-accredited invoicing system.
+
 ## Offline-capable store server
 
 The cloud deployment remains the online storefront and reporting authority. A store-local Laravel/PostgreSQL node serves the counter over the LAN, so POS sales, barcode lookup, login, inventory deduction, and facial-attendance capture continue when the internet connection is down.

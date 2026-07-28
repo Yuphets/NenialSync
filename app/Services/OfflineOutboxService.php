@@ -255,6 +255,8 @@ class OfflineOutboxService
                     'vatable_sales' => (float) $sale->vatable_sales,
                     'vat_amount' => (float) $sale->vat_amount,
                     'total' => (float) $sale->total,
+                    'amount_tendered' => (float) ($sale->amount_tendered ?? $sale->total),
+                    'change_due' => (float) ($sale->change_due ?? 0),
                     'completed_at' => $sale->completed_at->toIso8601String(),
                     'items' => $sale->items->map(fn ($item) => [
                         'sku' => $item->sku,

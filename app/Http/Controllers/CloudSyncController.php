@@ -364,6 +364,8 @@ class CloudSyncController extends Controller
             'payload.vatable_sales' => 'nullable|numeric|min:0',
             'payload.vat_amount' => 'nullable|numeric|min:0',
             'payload.total' => 'required|numeric|min:0',
+            'payload.amount_tendered' => 'nullable|numeric|min:0',
+            'payload.change_due' => 'nullable|numeric|min:0',
             'payload.completed_at' => 'required|date',
             'payload.items' => 'required|array|min:1',
             'payload.items.*.sku' => 'required|string',

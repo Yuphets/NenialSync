@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
+import PosReceipt from "../components/PosReceipt.vue";
 import { useAuthStore } from "../stores/auth";
 import { useInventoryStore } from "../stores/inventory";
 
@@ -16,6 +17,20 @@ const message = ref("");
 const busy = ref(false);
 const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
+const cashReceived = ref("");
+const lastReceipt = ref(null);
+const receiptPrint = ref(null);
+const readPreference = (key, fallback) => {
+    try {
+        return localStorage.getItem(key) ?? fallback;
+    } catch {
+        return fallback;
+    }
+};
+const receiptPaper = ref(readPreference("nenial-receipt-paper", "80"));
+const autoPrintReceipt = ref(
+    readPreference("nenial-receipt-auto-print", "true") !== "false",
+);
 const mobilePanel = ref("products");
 const posRoot = ref(null);
 const isFullscreen = ref(false);
@@ -85,6 +100,15 @@ const totalDiscount = computed(() => discount.value + saleDiscount.value);
 const total = computed(() => subtotal.value - totalDiscount.value);
 const vatable = computed(() => total.value / (1 + VAT_RATE));
 const vat = computed(() => total.value - vatable.value);
+const cashReceivedAmount = computed(() => Number(cashReceived.value) || 0);
+const changeDue = computed(() =>
+    Math.max(0, cashReceivedAmount.value - total.value),
+);
+const tenderIsValid = computed(
+    () =>
+        paymentMethod.value !== "cash" ||
+        cashReceivedAmount.value + 0.001 >= total.value,
+);
 const money = (value) =>
     Number(value).toLocaleString("en-PH", {
         minimumFractionDigits: 2,
@@ -95,6 +119,7 @@ onMounted(async () => {
     document.addEventListener("keydown", captureScannerKey, true);
     document.addEventListener("fullscreenchange", syncFullscreenState);
     syncFullscreenState();
+    restoreLastReceipt();
     await inventory.load();
     inventory.start();
 });
@@ -226,7 +251,49 @@ function clearTicket() {
     }
 }
 
+function exactCash() {
+    cashReceived.value = total.value.toFixed(2);
+}
+
+function saveReceiptPreferences() {
+    try {
+        localStorage.setItem("nenial-receipt-paper", receiptPaper.value);
+        localStorage.setItem(
+            "nenial-receipt-auto-print",
+            String(autoPrintReceipt.value),
+        );
+    } catch {
+        // Printing still works when browser storage is unavailable.
+    }
+}
+
+function restoreLastReceipt() {
+    try {
+        const stored = sessionStorage.getItem("nenial-last-pos-receipt");
+        if (stored) lastReceipt.value = JSON.parse(stored);
+    } catch {
+        try {
+            sessionStorage.removeItem("nenial-last-pos-receipt");
+        } catch {
+            // Reprint persistence is optional.
+        }
+    }
+}
+
+async function printLastReceipt() {
+    if (!lastReceipt.value) return;
+    await nextTick();
+    if (!receiptPrint.value?.print()) {
+        message.value = "The receipt could not be opened for printing.";
+    }
+}
+
 async function checkout() {
+    if (!tenderIsValid.value) {
+        message.value =
+            "Enter cash received equal to or greater than the amount due.";
+        return;
+    }
     busy.value = true;
     try {
         const { data } = await axios.post("/api/pos/checkout", {
@@ -236,15 +303,30 @@ async function checkout() {
             })),
             payment_method: paymentMethod.value,
             discount_percent: Number(saleDiscountPercent.value) || 0,
+            amount_tendered:
+                paymentMethod.value === "cash"
+                    ? cashReceivedAmount.value
+                    : total.value,
             idempotency_key: checkoutKey,
         });
+        lastReceipt.value = data;
+        try {
+            sessionStorage.setItem(
+                "nenial-last-pos-receipt",
+                JSON.stringify(data),
+            );
+        } catch {
+            // The current receipt remains available even without session storage.
+        }
         message.value = `Sale ${data.reference} completed · ₱${money(data.total)} (VAT ₱${money(data.vat_amount)})`;
         cart.value = [];
         saleDiscountPercent.value = 0;
         paymentMethod.value = "cash";
+        cashReceived.value = "";
         mobilePanel.value = "products";
         checkoutKey = crypto.randomUUID();
         await inventory.load();
+        if (autoPrintReceipt.value) await printLastReceipt();
     } catch (error) {
         message.value =
             error.response?.data?.message ||
@@ -489,16 +571,71 @@ async function checkout() {
                     </button>
                 </div>
                 <small v-if="paymentMethod !== 'cash'" class="tender-note">Confirm approval on the connected payment terminal before completing the sale.</small>
+                <div v-if="paymentMethod === 'cash'" class="cash-tender-entry">
+                    <label>
+                        <span>Cash received</span>
+                        <span class="money-input"
+                            ><b>₱</b
+                            ><input
+                                v-model="cashReceived"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputmode="decimal"
+                                placeholder="0.00"
+                                @keyup.enter="checkout"
+                        /></span>
+                    </label>
+                    <button class="btn tiny" type="button" @click="exactCash">
+                        Exact cash
+                    </button>
+                    <span class="change-preview"
+                        >Change <strong>₱{{ money(changeDue) }}</strong></span
+                    >
+                </div>
+                <div class="receipt-controls">
+                    <label class="receipt-auto-print">
+                        <input
+                            v-model="autoPrintReceipt"
+                            type="checkbox"
+                            @change="saveReceiptPreferences"
+                        />
+                        Print receipt automatically
+                    </label>
+                    <label class="receipt-paper">
+                        Paper
+                        <select
+                            v-model="receiptPaper"
+                            @change="saveReceiptPreferences"
+                        >
+                            <option value="80">80 mm</option>
+                            <option value="58">58 mm</option>
+                        </select>
+                    </label>
+                    <button
+                        v-if="lastReceipt"
+                        class="btn tiny"
+                        type="button"
+                        @click="printLastReceipt"
+                    >
+                        Reprint last
+                    </button>
+                </div>
             </div>
             <button
                 class="btn primary full checkout"
-                :disabled="!cart.length || busy"
+                :disabled="!cart.length || busy || !tenderIsValid"
                 @click="checkout"
             >
                 {{ busy ? "Processing…" : `Charge ₱${money(total)}` }}
             </button>
         </section>
     </div>
+    <PosReceipt
+        ref="receiptPrint"
+        :sale="lastReceipt"
+        :paper-size="receiptPaper"
+    />
     </div>
 </template>
 
@@ -634,6 +771,88 @@ async function checkout() {
 .tender-grid button { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-weight: 750; }
 .tender-grid button.active { border-color: var(--brand); color: var(--brand); background: var(--soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .tender-note { color: var(--muted); line-height: 1.4; }
+.cash-tender-entry {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) auto minmax(145px, auto);
+    align-items: end;
+    gap: .5rem;
+}
+.cash-tender-entry label {
+    display: grid;
+    gap: .25rem;
+    color: var(--muted);
+    font-size: .72rem;
+    font-weight: 750;
+}
+.money-input {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    min-height: 38px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+}
+.money-input:focus-within {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 2px rgba(23, 120, 74, .12);
+}
+.money-input b {
+    padding-left: .7rem;
+    color: var(--brand);
+}
+.money-input input {
+    width: 100%;
+    min-height: 36px;
+    border: 0;
+    border-radius: 0;
+    text-align: right;
+    box-shadow: none;
+}
+.change-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .65rem;
+    min-height: 38px;
+    padding: .45rem .7rem;
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--soft);
+    font-size: .76rem;
+    font-weight: 700;
+}
+.change-preview strong {
+    color: var(--brand);
+    white-space: nowrap;
+}
+.receipt-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .45rem .75rem;
+    color: var(--muted);
+    font-size: .7rem;
+}
+.receipt-auto-print,
+.receipt-paper {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    font-weight: 700;
+}
+.receipt-auto-print input {
+    width: 16px;
+    min-height: 16px;
+    accent-color: var(--brand);
+}
+.receipt-paper select {
+    width: auto;
+    min-height: 30px;
+    padding: .25rem 1.8rem .25rem .55rem;
+    font-size: .72rem;
+}
 @media (min-width: 1241px) {
     .pos-page.pos-focus-active {
         display: flex;
@@ -731,6 +950,10 @@ async function checkout() {
     .cashier-pos .tender-note {
         grid-column: 1 / -1;
     }
+    .cashier-pos .cash-tender-entry,
+    .cashier-pos .receipt-controls {
+        grid-column: 1 / -1;
+    }
     .cashier-pos .checkout {
         width: calc(100% - 28px);
         margin-inline: 14px;
@@ -811,6 +1034,20 @@ async function checkout() {
     .cashier-pos .tender-grid button {
         min-height: 32px;
     }
+    .cashier-pos .cash-tender-entry {
+        grid-template-columns: minmax(160px, 1fr) auto minmax(135px, auto);
+    }
+    .cashier-pos .money-input,
+    .cashier-pos .change-preview {
+        min-height: 32px;
+    }
+    .cashier-pos .money-input input {
+        min-height: 30px;
+        padding-block: .3rem;
+    }
+    .cashier-pos .receipt-controls {
+        min-height: 30px;
+    }
     .cashier-pos .checkout {
         min-height: 38px;
         margin-top: 8px;
@@ -879,6 +1116,8 @@ async function checkout() {
     .ticket-line { grid-template-columns: minmax(0, 1fr); }
     .ticket-line > b { text-align: left; }
     .tender-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .cash-tender-entry { grid-template-columns: minmax(0, 1fr) auto; }
+    .change-preview { grid-column: 1 / -1; }
 }
 @media (max-width: 430px) {
     .pos-keys { grid-template-columns: 1fr; }

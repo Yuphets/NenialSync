@@ -1,4 +1,4 @@
-const CACHE = 'nenial-shell-v8';
+const CACHE = 'nenial-shell-v9';
 const SHELL = ['/offline.html', '/responsive.css?v=20260728-1', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
 
 self.addEventListener('install', event => {

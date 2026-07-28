@@ -35,10 +35,14 @@ class OfflineSyncTest extends TestCase
         $this->actingAs($cashier)->postJson('/api/pos/checkout', [
             'items' => [['product_id' => $product->id, 'quantity' => 2]],
             'payment_method' => 'cash',
+            'amount_tendered' => 10000,
             'idempotency_key' => $eventId,
         ])->assertCreated();
 
         $this->assertDatabaseHas('sync_outbox', ['event_id' => $eventId, 'event_type' => 'sale.completed', 'status' => 'pending']);
+        $payload = SyncOutbox::where('event_id', $eventId)->firstOrFail()->payload;
+        $this->assertSame(10000.0, (float) $payload['amount_tendered']);
+        $this->assertGreaterThanOrEqual(0, (float) $payload['change_due']);
     }
 
     public function test_cloud_import_is_idempotent_and_deducts_inventory_once(): void
@@ -54,6 +58,11 @@ class OfflineSyncTest extends TestCase
 
         $this->assertSame($first->json('id'), $second->json('id'));
         $this->assertDatabaseHas('products', ['id' => $product->id, 'stock_quantity' => $before - 2]);
+        $this->assertDatabaseHas('sales', [
+            'id' => $first->json('id'),
+            'amount_tendered' => $payload['amount_tendered'],
+            'change_due' => $payload['change_due'],
+        ]);
         $this->assertDatabaseCount('sales', 1);
         $this->assertDatabaseCount('sync_receipts', 1);
     }
@@ -594,6 +603,8 @@ class OfflineSyncTest extends TestCase
             'subtotal' => $subtotal,
             'discount_total' => 0,
             'total' => $subtotal,
+            'amount_tendered' => $subtotal + 500,
+            'change_due' => 500,
             'completed_at' => now()->toIso8601String(),
             'items' => [[
                 'sku' => $product->sku,

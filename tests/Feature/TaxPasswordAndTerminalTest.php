@@ -30,7 +30,9 @@ class TaxPasswordAndTerminalTest extends TestCase
         $product = Product::first();
         $response = $this->actingAs($cashier)->postJson('/api/pos/checkout', [
             'items' => [['product_id' => $product->id, 'quantity' => 1]],
-            'payment_method' => 'cash', 'idempotency_key' => (string) Str::uuid(),
+            'payment_method' => 'cash',
+            'amount_tendered' => 10000,
+            'idempotency_key' => (string) Str::uuid(),
         ])->assertCreated();
 
         $total = (float) $response->json('total');
@@ -38,6 +40,50 @@ class TaxPasswordAndTerminalTest extends TestCase
         $vat = (float) $response->json('vat_amount');
         $this->assertEqualsWithDelta($total, $vatable + $vat, 0.01);
         $this->assertEqualsWithDelta($total * 0.12 / 1.12, $vat, 0.01);
+        $this->assertEqualsWithDelta(10000 - $total, (float) $response->json('change_due'), 0.01);
+        $response->assertJsonPath('amount_tendered', '10000.00')
+            ->assertJsonPath('receipt_profile.business_name', 'Nenial Enterprises & Construction')
+            ->assertJsonPath('cashier.name', $cashier->name);
+        $this->assertDatabaseHas('sales', [
+            'id' => $response->json('id'),
+            'amount_tendered' => 10000,
+        ]);
+    }
+
+    public function test_pos_rejects_insufficient_cash_before_recording_the_sale(): void
+    {
+        $cashier = User::where('role', 'cashier')->firstOrFail();
+        $product = Product::firstOrFail();
+
+        $this->actingAs($cashier)->postJson('/api/pos/checkout', [
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method' => 'cash',
+            'amount_tendered' => 1,
+            'idempotency_key' => (string) Str::uuid(),
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('amount_tendered');
+
+        $this->assertDatabaseCount('sales', 0);
+    }
+
+    public function test_non_cash_sale_records_the_total_as_tendered_without_change(): void
+    {
+        $cashier = User::where('role', 'cashier')->firstOrFail();
+        $product = Product::firstOrFail();
+
+        $response = $this->actingAs($cashier)->postJson('/api/pos/checkout', [
+            'items' => [['product_id' => $product->id, 'quantity' => 1]],
+            'payment_method' => 'gcash',
+            'amount_tendered' => 999999,
+            'idempotency_key' => (string) Str::uuid(),
+        ])->assertCreated();
+
+        $this->assertEqualsWithDelta(
+            (float) $response->json('total'),
+            (float) $response->json('amount_tendered'),
+            0.01
+        );
+        $this->assertSame('0.00', $response->json('change_due'));
     }
 
     public function test_admin_resolves_password_ticket_with_temporary_password(): void
