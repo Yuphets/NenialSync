@@ -31,6 +31,7 @@ async function logout() {
     await auth.logout();
     router.push("/");
 }
+
 </script>
 
 <template>

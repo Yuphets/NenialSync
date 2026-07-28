@@ -9,6 +9,10 @@ axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]')?.content;
 axios.defaults.withCredentials = true;
 
+if (localStorage.getItem('nenial-theme') === 'dark') {
+    document.documentElement.dataset.theme = 'dark';
+}
+
 createApp(App).use(createPinia()).use(router).mount('#app');
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
