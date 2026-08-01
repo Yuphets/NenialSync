@@ -6,7 +6,7 @@ Production-oriented Laravel 13 + Vue 3 application for a walk-in construction su
 
 - Role-based authentication: Admin, Assistant Admin, Cashier, Customer
 - Live storefront backed by current sellable inventory
-- POS with USB keyboard-wedge and browser-camera barcode scanning
+- POS with automatic USB keyboard-wedge barcode scanning
 - Transactional inventory with row locks, retry-safe checkout keys, reservations, safety stock, versioning, and an immutable movement ledger
 - Protected online orders: stock is reserved at checkout and deducted only after delivered goods are confirmed received
 - Employee management, Philippine statutory deductions, incentives, overtime, payroll runs
@@ -112,6 +112,8 @@ CACHE_STORE=database
 QUEUE_CONNECTION=database
 SESSION_SECURE_COOKIE=true
 SYNC_SHARED_SECRET=<64-character-random-secret>
+SYNC_PRIVILEGED_SECRET=<different-64-character-random-secret>
+SYNC_ALLOWED_NODE_IDS=store-main
 ```
 
 You may replace the individual `DB_*` values with Neon's pooled `DATABASE_URL`. Nenial recognizes both the current `DATABASE_URL` variable and the legacy Vercel `POSTGRES_URL` variable automatically. During deployment, the Composer `vercel` script validates `APP_KEY` and the database configuration, applies pending migrations, and seeds only a completely new installation. Configuration mistakes therefore fail the deployment build with a useful message instead of producing a generic HTTP 500.
@@ -138,10 +140,21 @@ Customer accounts should be created through the public sign-up flow so email ver
 2. Enable an **Enter / CR suffix** after every scan.
 3. Match the scanner keyboard locale to the POS computer.
 4. Print a supported symbology (EAN-13, UPC-A, Code 128) matching `products.barcode`.
-5. Open POS Terminal. The barcode field accepts the scan and Enter completes lookup.
-6. Use the built-in camera scanner only as a fallback and grant browser camera permission over HTTPS.
+5. Open POS Terminal and scan from anywhere on the screen. Fast keyboard-wedge input is recognized automatically, so the barcode field does not need focus; the Enter suffix is still accepted.
 
 Test ten repeated scans before opening the register. A scan must resolve exactly one SKU and must never add beyond `available_quantity`.
+
+### Thermal receipt setup
+
+The POS prepares a print-only receipt after every successful sale. **Print receipt automatically** is enabled by default; the cashier can choose 80 mm or 58 mm paper and can reprint the most recent receipt during the current browser session. Cash sales require the amount received and show the calculated change before checkout. The saved sale and its offline synchronization event retain the tendered amount and change.
+
+1. Install the thermal printer using its Windows driver and print a Windows test page.
+2. In the POS, select the matching **80 mm** or **58 mm** paper width.
+3. Complete a test sale and choose the thermal printer in the browser print dialog.
+4. Set margins to **None**, scale to **100%**, and disable browser headers and footers.
+5. Save the printer as the browser's most recently used destination.
+
+Normal browsers show a print confirmation dialog for security. A dedicated counter computer may use the browser's managed kiosk-printing option when the business requires unattended printing; restrict that computer to the POS and configure the printer through the operating system. Before customer use, set `RECEIPT_BUSINESS_NAME`, `RECEIPT_ADDRESS`, `RECEIPT_CONTACT`, `RECEIPT_TIN`, `RECEIPT_FOOTER`, and `RECEIPT_LEGAL_NOTE` to the registered business details. Printing a system transaction copy does not by itself make the application a government-accredited invoicing system.
 
 ## Offline-capable store server
 
@@ -149,7 +162,7 @@ The cloud deployment remains the online storefront and reporting authority. A st
 
 ### One-time cloud configuration
 
-Generate a long random synchronization secret and add it to the Vercel Production environment as `SYNC_SHARED_SECRET`, then redeploy. Keep this value out of Git and use the same value on the local server.
+Generate two different long random secrets. Add them to the Vercel Production environment as `SYNC_SHARED_SECRET` and `SYNC_PRIVILEGED_SECRET`, set `SYNC_ALLOWED_NODE_IDS=store-main`, then redeploy. Keep both values out of Git and use the same pair on the local server. The shared secret authenticates ordinary replication; the separate privileged secret signs account updates so possession of the ordinary sync token alone cannot create staff accounts, elevate roles, change staff credentials, or disable users. `APP_KEY` is used only as a compatibility fallback when the privileged secret is absent, so explicitly setting `SYNC_PRIVILEGED_SECRET` on both nodes is strongly recommended.
 
 ```powershell
 php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
@@ -166,6 +179,8 @@ LOCAL_DB_PASSWORD=use-a-long-random-password
 LOCAL_NODE_ID=store-main
 CLOUD_URL=https://nenialsync.vercel.app
 SYNC_SHARED_SECRET=the-same-secret-configured-in-vercel
+SYNC_PRIVILEGED_SECRET=the-second-secret-configured-in-vercel
+SYNC_ALLOWED_NODE_IDS=store-main
 ```
 
 Start the local PostgreSQL database, Laravel application, and 30-second synchronization worker:
@@ -213,6 +228,31 @@ Manual synchronization and status checks:
 docker compose -f docker-compose.local.yml exec app php artisan local:sync
 docker compose -f docker-compose.local.yml logs -f sync
 ```
+
+## Administrator maintenance mode
+
+An active Admin can open **Settings → Maintenance mode** to temporarily close the storefront and non-admin workspaces. Starting or ending maintenance requires the current administrator password and the displayed confirmation phrase. While maintenance is active:
+
+- Public pages return an HTTP 503 maintenance notice, and customers, assistants, and cashiers cannot sign in or continue using an already-open workspace.
+- The login page remains available for an active Admin, who can restore the website from Settings.
+- Trusted store synchronization, registered facial-attendance devices, health checks, and signed PayMongo webhooks remain operational.
+- The maintenance decision is synchronized between the Vercel/Neon deployment and the store-local Docker node. Stale events cannot overwrite a newer decision, and the authorizing active Admin is recorded in the audit log.
+
+The application database and session database must remain reachable for administrator recovery. Infrastructure-level database outages still require recovery through Neon/PostgreSQL and the deployment platform.
+
+## Statutory payroll standards
+
+Payroll uses an approved, effective-dated catalog for SSS, Pag-IBIG, and PhilHealth. The Workforce page shows the active revision, effective date, current calculation limits, verification date, and a direct link to the official publication. Finalization resolves the catalog using the payroll period end date and stores the complete applied rules and checksum with every immutable payroll snapshot. A later standard therefore changes future payroll only; it does not rewrite a finalized run.
+
+The catalog currently contains:
+
+- SSS Circular 2024-006, effective January 1, 2025: 5% employee share and a PHP 5,000–35,000 Monthly Salary Credit.
+- Pag-IBIG Circular 460, effective February 1, 2024: 1%/2% employee rates and a PHP 10,000 maximum Fund Salary.
+- PhilHealth Premium Advisory 2025-0002: 5% total premium, shared equally, using the PHP 10,000–100,000 salary band. No superseding 2026 premium-rate issuance was located as of July 27, 2026.
+
+Vercel runs `/api/cron/statutory-rates` daily at 08:30 Philippine time. Add a random `CRON_SECRET` of at least 16 characters to the Vercel Production environment; Vercel sends it as a Bearer token automatically. An Admin can also select **Check official sources** in Workforce. The monitor fingerprints official agency publication pages and raises **Review required** if a source changes.
+
+SSS, Pag-IBIG, and PhilHealth do not publish one documented machine-readable rate API. For payroll safety, a changed webpage or PDF is never interpreted and activated silently. Have the company accountant verify a new circular/advisory, add it as a new approved effective-dated catalog revision, and test its boundary values. Scheduled approved revisions activate automatically on their effective date and synchronize to the Docker store node through the existing authenticated cloud configuration channel.
 
 ## Facial-recognition terminal setup
 
@@ -288,4 +328,4 @@ The feature suite covers stock deduction, online reservations, receipt settlemen
 - Review Vercel runtime logs and Neon query metrics.
 - Validate statutory payroll rates with the responsible accountant before every effective-period change.
 
-Payroll selects the newest `statutory_rates` row whose `effective_from` date has begun. The seeded 2025 SSS and PhilHealth parameters follow the published [SSS contribution guidance](https://www.sss.gov.ph/pay-contribution/) and [PhilHealth 2025 advisory](https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf); an accountant should still approve each new effective row before payroll is finalized.
+Payroll selects the newest approved `statutory_rates` row valid on the payroll period end date, including its optional `effective_to` boundary. Official-source monitoring identifies publications that need review; an accountant must approve the actual new rules before they can affect payroll.

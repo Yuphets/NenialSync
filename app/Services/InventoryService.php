@@ -43,7 +43,7 @@ class InventoryService
         });
     }
 
-    public function completeSale(User $cashier, array $lines, string $paymentMethod, float $saleDiscount, string $idempotencyKey): Sale
+    public function completeSale(User $cashier, array $lines, string $paymentMethod, float $saleDiscount, string $idempotencyKey, ?float $amountTendered = null): Sale
     {
         if ($existing = Sale::with('items', 'cashier')->where('idempotency_key', $idempotencyKey)->first()) {
             $this->outbox->queueSale($existing);
@@ -51,17 +51,28 @@ class InventoryService
             return $existing;
         }
 
-        return DB::transaction(function () use ($cashier, $lines, $paymentMethod, $saleDiscount, $idempotencyKey) {
+        return DB::transaction(function () use ($cashier, $lines, $paymentMethod, $saleDiscount, $idempotencyKey, $amountTendered) {
             $products = $this->lockProducts($lines);
             [$items, $subtotal, $discount] = $this->priceLines($products, $lines);
             $discount += round(max(0, min(100, $saleDiscount)) / 100 * ($subtotal - $discount), 2);
             $tax = $this->taxBreakdown($subtotal - $discount);
+            $tendered = $paymentMethod === 'cash'
+                ? round((float) ($amountTendered ?? $tax['total']), 2)
+                : $tax['total'];
+            if ($paymentMethod === 'cash' && $tendered < $tax['total']) {
+                throw ValidationException::withMessages([
+                    'amount_tendered' => 'Cash received must be equal to or greater than the amount due.',
+                ]);
+            }
             $sale = Sale::create([
                 'reference' => 'POS-'.now()->format('YmdHis').'-'.Str::upper(Str::random(4)),
                 'idempotency_key' => $idempotencyKey,
                 'cashier_id' => $cashier->id, 'channel' => 'pos', 'payment_method' => $paymentMethod,
                 'status' => 'completed', 'subtotal' => $subtotal, 'discount_total' => $discount,
-                ...$tax, 'completed_at' => now(),
+                ...$tax,
+                'amount_tendered' => $tendered,
+                'change_due' => max(0, round($tendered - $tax['total'], 2)),
+                'completed_at' => now(),
             ]);
 
             foreach ($items as $item) {
@@ -91,6 +102,15 @@ class InventoryService
             if ($products->count() !== $skus->count()) {
                 throw ValidationException::withMessages(['items' => 'One or more offline-sale products no longer exist in cloud inventory.']);
             }
+            $total = round((float) $payload['total'], 2);
+            $tendered = $payload['payment_method'] === 'cash'
+                ? round((float) ($payload['amount_tendered'] ?? $total), 2)
+                : $total;
+            if ($payload['payment_method'] === 'cash' && $tendered < $total) {
+                throw ValidationException::withMessages([
+                    'amount_tendered' => 'The synchronized cash amount is less than the sale total.',
+                ]);
+            }
 
             $sale = Sale::create([
                 'reference' => 'OFF-'.Str::upper(Str::slug($nodeId)).'-'.Str::upper(Str::random(8)),
@@ -106,7 +126,9 @@ class InventoryService
                 'vat_rate' => $payload['vat_rate'] ?? config('tax.vat_rate'),
                 'vatable_sales' => $payload['vatable_sales'] ?? round($payload['total'] / (1 + config('tax.vat_rate')), 2),
                 'vat_amount' => $payload['vat_amount'] ?? round($payload['total'] - ($payload['total'] / (1 + config('tax.vat_rate'))), 2),
-                'total' => $payload['total'],
+                'total' => $total,
+                'amount_tendered' => $tendered,
+                'change_due' => max(0, round($tendered - $total, 2)),
                 'completed_at' => $payload['completed_at'],
                 'synced_at' => now(),
             ]);

@@ -14,11 +14,13 @@
 /auth.json
 /backups
 /node_modules
+/output
 /public/build
 /public/hot
 /public/storage
 /storage/*.key
 /storage/pail
+/tmp
 /vendor
 Homestead.json
 Homestead.yaml

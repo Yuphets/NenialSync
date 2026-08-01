@@ -19,6 +19,7 @@ const temporaryPassword = ref("");
 const ticketNumber = ref(localStorage.getItem("nenial-password-ticket") || "");
 const verificationEmail = ref(route.query.email || "");
 const capabilities = ref({ email_delivery: true, google: false });
+const maintenance = ref({ enabled: false, message: "" });
 const resendRemaining = ref(0);
 const showPassword = ref(false);
 const form = reactive({
@@ -153,10 +154,16 @@ function googleLogin() {
     window.location.assign("/auth/google/redirect");
 }
 onMounted(async () => {
-    try {
-        capabilities.value = (await axios.get("/api/auth/capabilities")).data;
-    } catch {
-        /* Keep password login available. */
+    const [capabilityResult, maintenanceResult] = await Promise.allSettled([
+        axios.get("/api/auth/capabilities"),
+        axios.get("/api/system/status"),
+    ]);
+    if (capabilityResult.status === "fulfilled") {
+        capabilities.value = capabilityResult.value.data;
+    }
+    if (maintenanceResult.status === "fulfilled") {
+        maintenance.value = maintenanceResult.value.data;
+        if (maintenance.value.enabled) mode.value = "login";
     }
 });
 onBeforeUnmount(() => {
@@ -176,10 +183,15 @@ onBeforeUnmount(() => {
             </p>
         </section>
         <section class="auth-panel">
-            <RouterLink to="/" class="back">← Back to store</RouterLink>
+            <a v-if="maintenance.enabled" href="/maintenance" class="back"
+                >← Back to maintenance notice</a
+            >
+            <RouterLink v-else to="/" class="back">← Back to store</RouterLink>
             <form class="auth-card" @submit.prevent="submit">
                 <span class="eyebrow">{{
-                    mode === "ticket"
+                    maintenance.enabled
+                        ? "Maintenance access"
+                        : mode === "ticket"
                         ? "Password assistance"
                         : mode === "verify"
                           ? "Email verification"
@@ -187,7 +199,9 @@ onBeforeUnmount(() => {
                 }}</span>
                 <h2>
                     {{
-                        mode === "login"
+                        maintenance.enabled
+                            ? "Administrator sign in"
+                            : mode === "login"
                             ? "Welcome back"
                             : mode === "register"
                               ? "Create customer account"
@@ -196,6 +210,11 @@ onBeforeUnmount(() => {
                                 : "Request a reset ticket"
                     }}
                 </h2>
+                <p v-if="maintenance.enabled" class="maintenance-login-note">
+                    <strong>The website is currently under maintenance.</strong>
+                    {{ maintenance.message }} Only an active administrator can
+                    sign in and restore access.
+                </p>
                 <label v-if="mode === 'register'"
                     >Full name<input
                         v-model="form.name"
@@ -301,7 +320,11 @@ onBeforeUnmount(() => {
                             ? `Resend available in ${resendRemaining}s`
                             : "Resend code"
                     }}</button
-                ><template v-if="['login', 'register'].includes(mode)"
+                ><template
+                    v-if="
+                        !maintenance.enabled &&
+                        ['login', 'register'].includes(mode)
+                    "
                     ><div class="auth-divider"><span>or</span></div>
                     <button
                         type="button"
@@ -322,7 +345,7 @@ onBeforeUnmount(() => {
                         }}
                     </button></template
                 ><button
-                    v-if="mode === 'login'"
+                    v-if="mode === 'login' && !maintenance.enabled"
                     type="button"
                     class="text-button"
                     @click="
@@ -339,6 +362,7 @@ onBeforeUnmount(() => {
                 >
                     Check ticket status</button
                 ><button
+                    v-if="!maintenance.enabled"
                     type="button"
                     class="text-button"
                     @click="mode = mode === 'login' ? 'register' : 'login'"

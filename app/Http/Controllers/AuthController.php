@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\EmailVerificationOtp;
 use App\Models\PasswordResetTicket;
 use App\Models\User;
+use App\Services\MaintenanceModeService;
 use App\Services\OfflineOutboxService;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -31,10 +32,29 @@ class AuthController extends Controller
         ];
     }
 
-    public function login(Request $request)
+    public function login(Request $request, MaintenanceModeService $maintenance)
     {
         $data = $request->validate(['email' => 'required|email', 'password' => 'required|string']);
         $user = User::whereRaw('LOWER(email) = ?', [Str::lower($data['email'])])->where('is_active', true)->first();
+
+        if ($maintenance->enabled() && (
+            ! $user
+            || $user->role !== 'admin'
+            || ! Hash::check($data['password'], $user->password)
+        )) {
+            $status = $maintenance->status();
+
+            return response()->json([
+                'message' => 'The website is currently under maintenance. Only an administrator can sign in.',
+                'maintenance' => true,
+                'status' => $status,
+            ], 503, [
+                'Cache-Control' => 'no-store, private',
+                'Retry-After' => '300',
+                'X-Nenial-Maintenance' => '1',
+            ]);
+        }
+
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json(['message' => 'Invalid credentials.'], 422);
         }
@@ -135,7 +155,7 @@ class AuthController extends Controller
     {
         $data = $request->validate(['current_password' => 'required|current_password', 'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()]]);
         $request->user()->update(['password' => Hash::make($data['password']), 'password_changed_at' => now(), 'must_change_password' => false]);
-        $outbox->queueUser($request->user()->fresh());
+        $outbox->queueUser($request->user()->fresh(), authorizedBy: $request->user());
 
         return response()->json(['message' => 'Password updated.']);
     }

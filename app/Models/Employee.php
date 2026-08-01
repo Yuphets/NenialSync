@@ -25,4 +25,9 @@ class Employee extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function faceEnrollments()
+    {
+        return $this->hasMany(FaceEnrollment::class);
+    }
 }

@@ -15,6 +15,8 @@ class Sale extends Model
             'vat_rate' => 'decimal:4',
             'vatable_sales' => 'decimal:2',
             'vat_amount' => 'decimal:2',
+            'amount_tendered' => 'decimal:2',
+            'change_due' => 'decimal:2',
         ];
     }
 

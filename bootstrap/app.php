@@ -2,7 +2,9 @@
 
 use App\Http\Middleware\AuthenticateDevice;
 use App\Http\Middleware\AuthenticateSync;
+use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureRole;
+use App\Http\Middleware\EnsureSiteAvailable;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -19,8 +21,21 @@ return Application::configure(basePath: dirname(__DIR__))
         // Vercel terminates TLS before forwarding requests to the PHP function.
         // Trust its forwarding headers so generated Vite asset URLs remain HTTPS.
         $middleware->trustProxies(at: '*');
-        $middleware->alias(['role' => EnsureRole::class, 'device' => AuthenticateDevice::class, 'sync' => AuthenticateSync::class]);
-        $middleware->validateCsrfTokens(except: ['api/device/*', 'api/sync/*']);
+        $middleware->redirectGuestsTo(
+            fn (Request $request) => $request->is('api/*') ? null : '/login'
+        );
+        $middleware->alias([
+            'active' => EnsureActiveUser::class,
+            'role' => EnsureRole::class,
+            'device' => AuthenticateDevice::class,
+            'sync' => AuthenticateSync::class,
+            'site.available' => EnsureSiteAvailable::class,
+        ]);
+        $middleware->validateCsrfTokens(except: [
+            'api/device/*',
+            'api/sync/*',
+            'api/payments/webhooks/*',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (AuthenticationException $exception, Request $request) {

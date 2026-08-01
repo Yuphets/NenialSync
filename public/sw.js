@@ -1,5 +1,5 @@
-const CACHE = 'nenial-shell-v6';
-const SHELL = ['/', '/responsive.css?v=20260702-4', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
+const CACHE = 'nenial-shell-v9';
+const SHELL = ['/offline.html', '/responsive.css?v=20260728-1', '/manifest.webmanifest', '/face-manifest.webmanifest', '/media/Nenial.jpg', '/media/Background.jpg'];
 
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
@@ -19,10 +19,12 @@ self.addEventListener('fetch', event => {
 
     if (request.mode === 'navigate') {
         event.respondWith(fetch(request).then(response => {
-            const copy = response.clone();
-            caches.open(CACHE).then(cache => cache.put('/', copy));
+            if (response.ok && url.pathname === '/' && response.headers.get('X-Nenial-Maintenance') !== '1') {
+                const copy = response.clone();
+                caches.open(CACHE).then(cache => cache.put('/', copy));
+            }
             return response;
-        }).catch(() => caches.match('/')));
+        }).catch(async () => (await caches.match('/')) || caches.match('/offline.html')));
         return;
     }
 

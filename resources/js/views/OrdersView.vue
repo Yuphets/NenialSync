@@ -107,7 +107,7 @@ const pagedOrders = computed(() =>
         subtitle="Protected payments and inventory reservations"
     />
     <p v-if="message" class="notice">{{ message }}</p>
-    <section class="panel filters inline-filters">
+    <section class="panel filters inline-filters single-search-filter">
         <label>Search orders<input v-model="search" placeholder="Reference, customer, item, status, payment" /></label>
         <button v-if="search" class="btn" @click="search = ''">Clear search</button>
         <small>{{ visibleOrders.length }} of {{ orders.length }} orders shown</small>

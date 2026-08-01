@@ -11,12 +11,25 @@ const showBackup = ref(false);
 const backupPassword = ref("");
 const backupBusy = ref(false);
 const backupError = ref("");
-const from = ref(
-    new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-        .toISOString()
-        .slice(0, 10),
-);
-const to = ref(new Date().toISOString().slice(0, 10));
+const manilaDateKey = (value = new Date()) => {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-US", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            timeZone: "Asia/Manila",
+        })
+            .formatToParts(date)
+            .map(({ type, value: part }) => [type, part]),
+    );
+
+    return `${parts.year}-${parts.month}-${parts.day}`;
+};
+const today = manilaDateKey();
+const from = ref(`${today.slice(0, 7)}-01`);
+const to = ref(today);
 const payrollSearch = ref("");
 const payrollFrom = ref("");
 const payrollTo = ref("");
@@ -32,7 +45,7 @@ const inDateRange = (value, fromValue, toValue) => {
     if (!value) return false;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return false;
-    const day = date.toISOString().slice(0, 10);
+    const day = manilaDateKey(date);
 
     return (!fromValue || day >= fromValue) && (!toValue || day <= toValue);
 };
@@ -45,7 +58,7 @@ const filteredPayrollRuns = computed(() => {
             [
                 run.reference,
                 run.status,
-                run.creator?.name,
+                run.created_by_name || run.creator?.name,
                 run.period_start,
                 run.period_end,
                 run.items_count,
@@ -364,7 +377,7 @@ async function downloadBackup() {
                     <td data-label="Employees">{{ run.items_count }}</td>
                     <td data-label="Gross">₱{{ money(run.gross_pay) }}</td>
                     <td data-label="Net">₱{{ money(run.net_pay) }}</td>
-                    <td data-label="Finalized by">{{ run.creator?.name }}</td>
+                    <td data-label="Finalized by">{{ run.created_by_name || run.creator?.name }}</td>
                     <td data-label="Finalized">
                         {{ dateTime(run.finalized_at) }}
                     </td>

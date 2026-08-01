@@ -1,8 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import axios from "axios";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import PageHeader from "../components/PageHeader.vue";
+import PosReceipt from "../components/PosReceipt.vue";
 import { useAuthStore } from "../stores/auth";
 import { useInventoryStore } from "../stores/inventory";
 
@@ -15,14 +15,32 @@ const selectedCategory = ref("All");
 const cart = ref([]);
 const message = ref("");
 const busy = ref(false);
-const showCamera = ref(false);
-const video = ref(null);
 const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
+const cashReceived = ref("");
+const lastReceipt = ref(null);
+const receiptPrint = ref(null);
+const readPreference = (key, fallback) => {
+    try {
+        return localStorage.getItem(key) ?? fallback;
+    } catch {
+        return fallback;
+    }
+};
+const receiptPaper = ref(readPreference("nenial-receipt-paper", "80"));
+const autoPrintReceipt = ref(
+    readPreference("nenial-receipt-auto-print", "true") !== "false",
+);
 const mobilePanel = ref("products");
-const reader = new BrowserMultiFormatReader();
-let scannerControls = null;
+const posRoot = ref(null);
+const isFullscreen = ref(false);
 let checkoutKey = crypto.randomUUID();
+let scannerBuffer = "";
+let scannerStartedAt = 0;
+let scannerLastKeyAt = 0;
+let scannerTimer = null;
+const SCANNER_MAX_KEY_GAP_MS = 80;
+const SCANNER_IDLE_SUBMIT_MS = 120;
 
 const categories = computed(() => [
     "All",
@@ -82,6 +100,15 @@ const totalDiscount = computed(() => discount.value + saleDiscount.value);
 const total = computed(() => subtotal.value - totalDiscount.value);
 const vatable = computed(() => total.value / (1 + VAT_RATE));
 const vat = computed(() => total.value - vatable.value);
+const cashReceivedAmount = computed(() => Number(cashReceived.value) || 0);
+const changeDue = computed(() =>
+    Math.max(0, cashReceivedAmount.value - total.value),
+);
+const tenderIsValid = computed(
+    () =>
+        paymentMethod.value !== "cash" ||
+        cashReceivedAmount.value + 0.001 >= total.value,
+);
 const money = (value) =>
     Number(value).toLocaleString("en-PH", {
         minimumFractionDigits: 2,
@@ -89,36 +116,132 @@ const money = (value) =>
     });
 
 onMounted(async () => {
+    document.addEventListener("keydown", captureScannerKey, true);
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    syncFullscreenState();
+    restoreLastReceipt();
     await inventory.load();
     inventory.start();
 });
 onBeforeUnmount(() => {
     inventory.stop();
-    scannerControls?.stop();
+    document.removeEventListener("keydown", captureScannerKey, true);
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
+    document.body.classList.remove("pos-focus-mode");
+    if (document.fullscreenElement === posRoot.value) {
+        document.exitFullscreen().catch(() => {});
+    }
+    clearTimeout(scannerTimer);
 });
+
+function syncFullscreenState() {
+    const active = document.fullscreenElement === posRoot.value;
+    isFullscreen.value = active;
+    document.body.classList.toggle("pos-focus-mode", active);
+    if (active) resetPosViewport();
+}
+
+function resetPosViewport() {
+    window.requestAnimationFrame(() => {
+        if (!posRoot.value) return;
+        posRoot.value.scrollTop = 0;
+        posRoot.value.scrollLeft = 0;
+    });
+}
+
+async function toggleFullscreen() {
+    try {
+        if (document.fullscreenElement === posRoot.value) {
+            await document.exitFullscreen();
+            return;
+        }
+
+        if (!posRoot.value?.requestFullscreen) {
+            isFullscreen.value = !isFullscreen.value;
+            document.body.classList.toggle(
+                "pos-focus-mode",
+                isFullscreen.value,
+            );
+            if (isFullscreen.value) resetPosViewport();
+            return;
+        }
+
+        await posRoot.value.requestFullscreen();
+        syncFullscreenState();
+    } catch {
+        message.value =
+            "Fullscreen could not be opened. Check the browser permission and try again.";
+    }
+}
 
 function add(product) {
     const item = cart.value.find((value) => value.id === product.id);
     const quantity = (item?.quantity || 0) + 1;
     if (quantity > product.available_quantity) {
         message.value = "Insufficient available stock.";
-        return;
+        return false;
     }
     item ? item.quantity++ : cart.value.push({ ...product, quantity: 1 });
     barcode.value = "";
     message.value = "";
     if (window.matchMedia("(max-width: 1240px)").matches)
         mobilePanel.value = "cart";
+    return true;
 }
 
-function scan() {
-    const code = barcode.value.trim();
+function scan(scannedCode = barcode.value) {
+    const code = String(scannedCode || "").trim();
+    if (!code) return;
     const product = inventory.products.find(
         (item) =>
             item.barcode === code ||
             item.sku.toLowerCase() === code.toLowerCase(),
     );
-    product ? add(product) : (message.value = "Barcode or SKU not found.");
+    if (product) {
+        if (add(product)) message.value = `${product.name} scanned and added.`;
+    } else {
+        barcode.value = code;
+        message.value = `Barcode or SKU "${code}" was not found.`;
+    }
+}
+
+function captureScannerKey(event) {
+    if (event.ctrlKey || event.altKey || event.metaKey || event.isComposing || event.repeat) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
+
+    if ((event.key === "Enter" || event.key === "Tab") && scannerBuffer) {
+        event.preventDefault();
+        submitScannerBuffer();
+        return;
+    }
+    if (event.key.length !== 1) return;
+
+    const now = performance.now();
+    if (scannerLastKeyAt && now - scannerLastKeyAt > SCANNER_MAX_KEY_GAP_MS) resetScannerBuffer();
+    if (!scannerBuffer) scannerStartedAt = now;
+    scannerBuffer += event.key;
+    scannerLastKeyAt = now;
+    clearTimeout(scannerTimer);
+    scannerTimer = setTimeout(submitScannerBuffer, SCANNER_IDLE_SUBMIT_MS);
+}
+
+function submitScannerBuffer() {
+    clearTimeout(scannerTimer);
+    const code = scannerBuffer.trim();
+    const duration = scannerLastKeyAt - scannerStartedAt;
+    const averageGap = code.length > 1 ? duration / (code.length - 1) : Infinity;
+    resetScannerBuffer();
+    if (code.length < 3 || averageGap > SCANNER_MAX_KEY_GAP_MS) return;
+    barcode.value = code;
+    scan(code);
+}
+
+function resetScannerBuffer() {
+    clearTimeout(scannerTimer);
+    scannerBuffer = "";
+    scannerStartedAt = 0;
+    scannerLastKeyAt = 0;
 }
 
 function clearTicket() {
@@ -128,35 +251,49 @@ function clearTicket() {
     }
 }
 
-function closeCamera() {
-    scannerControls?.stop();
-    scannerControls = null;
-    showCamera.value = false;
+function exactCash() {
+    cashReceived.value = total.value.toFixed(2);
 }
 
-async function camera() {
-    showCamera.value = true;
-    await new Promise((resolve) => setTimeout(resolve));
+function saveReceiptPreferences() {
     try {
-        scannerControls = await reader.decodeFromVideoDevice(
-            undefined,
-            video.value,
-            (result) => {
-                if (result) {
-                    barcode.value = result.getText();
-                    closeCamera();
-                    scan();
-                }
-            },
+        localStorage.setItem("nenial-receipt-paper", receiptPaper.value);
+        localStorage.setItem(
+            "nenial-receipt-auto-print",
+            String(autoPrintReceipt.value),
         );
     } catch {
-        closeCamera();
-        message.value =
-            "Camera access failed. Use a USB scanner or grant camera permission.";
+        // Printing still works when browser storage is unavailable.
+    }
+}
+
+function restoreLastReceipt() {
+    try {
+        const stored = sessionStorage.getItem("nenial-last-pos-receipt");
+        if (stored) lastReceipt.value = JSON.parse(stored);
+    } catch {
+        try {
+            sessionStorage.removeItem("nenial-last-pos-receipt");
+        } catch {
+            // Reprint persistence is optional.
+        }
+    }
+}
+
+async function printLastReceipt() {
+    if (!lastReceipt.value) return;
+    await nextTick();
+    if (!receiptPrint.value?.print()) {
+        message.value = "The receipt could not be opened for printing.";
     }
 }
 
 async function checkout() {
+    if (!tenderIsValid.value) {
+        message.value =
+            "Enter cash received equal to or greater than the amount due.";
+        return;
+    }
     busy.value = true;
     try {
         const { data } = await axios.post("/api/pos/checkout", {
@@ -166,15 +303,30 @@ async function checkout() {
             })),
             payment_method: paymentMethod.value,
             discount_percent: Number(saleDiscountPercent.value) || 0,
+            amount_tendered:
+                paymentMethod.value === "cash"
+                    ? cashReceivedAmount.value
+                    : total.value,
             idempotency_key: checkoutKey,
         });
+        lastReceipt.value = data;
+        try {
+            sessionStorage.setItem(
+                "nenial-last-pos-receipt",
+                JSON.stringify(data),
+            );
+        } catch {
+            // The current receipt remains available even without session storage.
+        }
         message.value = `Sale ${data.reference} completed · ₱${money(data.total)} (VAT ₱${money(data.vat_amount)})`;
         cart.value = [];
         saleDiscountPercent.value = 0;
         paymentMethod.value = "cash";
+        cashReceived.value = "";
         mobilePanel.value = "products";
         checkoutKey = crypto.randomUUID();
         await inventory.load();
+        if (autoPrintReceipt.value) await printLastReceipt();
     } catch (error) {
         message.value =
             error.response?.data?.message ||
@@ -187,11 +339,34 @@ async function checkout() {
 </script>
 
 <template>
-    <div class="pos-page" :class="{ 'cashier-pos': auth.role === 'cashier' }">
+    <div
+        ref="posRoot"
+        class="pos-page"
+        :class="{
+            'cashier-pos': auth.role === 'cashier',
+            'pos-focus-active': isFullscreen,
+        }"
+    >
     <PageHeader
         title="POS Terminal"
         subtitle="Fast counter checkout with transaction-safe stock deduction"
-        ><span class="live">● Inventory live</span></PageHeader
+        ><div class="actions pos-header-actions">
+            <span class="live">● Inventory live</span>
+            <button
+                v-if="['admin', 'cashier'].includes(auth.role)"
+                class="btn"
+                type="button"
+                :aria-pressed="isFullscreen"
+                :aria-label="
+                    isFullscreen
+                        ? 'Exit POS fullscreen'
+                        : 'Open POS fullscreen'
+                "
+                @click="toggleFullscreen"
+            >
+                {{ isFullscreen ? "Exit fullscreen" : "Fullscreen POS" }}
+            </button>
+        </div></PageHeader
     >
     <p v-if="message" class="notice">{{ message }}</p>
     <nav class="pos-mobile-tabs" aria-label="POS workspace">
@@ -218,18 +393,37 @@ async function checkout() {
                     <h2>Product library</h2>
                     <small>{{ products.length }} products available</small>
                 </div>
-                <span class="register-state">Register open</span>
+                <div class="pos-panel-actions">
+                    <button
+                        v-if="auth.role === 'cashier'"
+                        class="btn tiny cashier-fullscreen-button"
+                        type="button"
+                        :aria-pressed="isFullscreen"
+                        :aria-label="
+                            isFullscreen
+                                ? 'Exit POS fullscreen'
+                                : 'Open POS fullscreen'
+                        "
+                        @click="toggleFullscreen"
+                    >
+                        {{
+                            isFullscreen
+                                ? "Exit fullscreen"
+                                : "Fullscreen POS"
+                        }}
+                    </button>
+                    <span class="register-state">Register open</span>
+                </div>
             </div>
             <div class="scanner pos-scanner">
                 <label class="scan-field"
-                    >Barcode or SKU<input
+                    ><span class="scan-label-head"><span>Barcode or SKU</span><small>Scanner ready · scan anytime</small></span><input
                         v-model="barcode"
                         autofocus
                         placeholder="Scan or type product code"
-                        @keyup.enter="scan"
+                        @keyup.enter="scan()"
                 /></label>
-                <button class="btn primary" @click="scan">Add item</button>
-                <button class="btn" @click="camera">Camera</button>
+                <button class="btn primary" @click="scan()">Add item</button>
             </div>
             <label class="pos-search"
                 >Find a product<input
@@ -377,31 +571,118 @@ async function checkout() {
                     </button>
                 </div>
                 <small v-if="paymentMethod !== 'cash'" class="tender-note">Confirm approval on the connected payment terminal before completing the sale.</small>
+                <div v-if="paymentMethod === 'cash'" class="cash-tender-entry">
+                    <label>
+                        <span>Cash received</span>
+                        <span class="money-input"
+                            ><b>₱</b
+                            ><input
+                                v-model="cashReceived"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputmode="decimal"
+                                placeholder="0.00"
+                                @keyup.enter="checkout"
+                        /></span>
+                    </label>
+                    <button class="btn tiny" type="button" @click="exactCash">
+                        Exact cash
+                    </button>
+                    <span class="change-preview"
+                        >Change <strong>₱{{ money(changeDue) }}</strong></span
+                    >
+                </div>
+                <div class="receipt-controls">
+                    <label class="receipt-auto-print">
+                        <input
+                            v-model="autoPrintReceipt"
+                            type="checkbox"
+                            @change="saveReceiptPreferences"
+                        />
+                        Print receipt automatically
+                    </label>
+                    <label class="receipt-paper">
+                        Paper
+                        <select
+                            v-model="receiptPaper"
+                            @change="saveReceiptPreferences"
+                        >
+                            <option value="80">80 mm</option>
+                            <option value="58">58 mm</option>
+                        </select>
+                    </label>
+                    <button
+                        v-if="lastReceipt"
+                        class="btn tiny"
+                        type="button"
+                        @click="printLastReceipt"
+                    >
+                        Reprint last
+                    </button>
+                </div>
             </div>
             <button
                 class="btn primary full checkout"
-                :disabled="!cart.length || busy"
+                :disabled="!cart.length || busy || !tenderIsValid"
                 @click="checkout"
             >
                 {{ busy ? "Processing…" : `Charge ₱${money(total)}` }}
             </button>
         </section>
     </div>
-    <div v-if="showCamera" class="modal">
-        <div class="modal-card">
-            <div class="panel-head">
-                <h2>Camera barcode scanner</h2>
-                <button class="btn ghost" @click="closeCamera">Close</button>
-            </div>
-            <video ref="video"></video>
-            <p>Position the barcode inside the camera view.</p>
-        </div>
-    </div>
+    <PosReceipt
+        ref="receiptPrint"
+        :sale="lastReceipt"
+        :paper-size="receiptPaper"
+    />
     </div>
 </template>
 
 <style scoped>
-.pos-page { min-width: 0; }
+.pos-page { min-width: 0; box-sizing: border-box; }
+.pos-header-actions { align-items: center; }
+.pos-panel-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .45rem;
+}
+.cashier-fullscreen-button {
+    min-height: 32px;
+    padding: .35rem .65rem;
+    color: var(--brand);
+    border-color: #bfd8c8;
+    background: #fff;
+    white-space: nowrap;
+}
+.pos-page.pos-focus-active:not(:fullscreen) {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    width: 100vw;
+    height: 100dvh;
+    padding: max(14px, env(safe-area-inset-top)) 14px
+        max(14px, env(safe-area-inset-bottom));
+    overflow: auto;
+    background: var(--page);
+}
+.pos-page:fullscreen {
+    width: 100%;
+    height: 100dvh;
+    padding: max(14px, env(safe-area-inset-top)) 14px 14px;
+    overflow-y: auto;
+    background: var(--page);
+}
+.pos-page:fullscreen > .page-header,
+.pos-page.pos-focus-active > .page-header {
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 64px;
+    margin: 0 auto 12px;
+    padding-top: 2px;
+    align-items: center;
+}
 .pos-mobile-tabs { display: none; }
 .pos-workstation {
     grid-template-columns: minmax(390px, .82fr) minmax(0, 1.28fr);
@@ -415,8 +696,10 @@ async function checkout() {
 .product-library { display: flex; flex-direction: column; }
 .pos-panel-head h2 { margin: 0 0 .2rem; }
 .register-state { padding: .35rem .65rem; border-radius: 999px; color: var(--brand); background: var(--soft); font-size: .72rem; font-weight: 800; }
-.pos-scanner { grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; padding-bottom: 8px; }
+.pos-scanner { grid-template-columns: minmax(0, 1fr) auto; align-items: end; padding-bottom: 8px; }
 .scan-field { min-width: 0; }
+.scan-label-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.scan-label-head small { color: var(--brand); font-size: .68rem; font-weight: 800; }
 .pos-scanner .btn { min-width: 88px; padding-inline: .75rem; white-space: nowrap; }
 .pos-search { margin: 0 12px 10px; }
 .category-strip { display: flex; gap: .4rem; padding: 0 12px 10px; overflow-x: auto; }
@@ -424,7 +707,7 @@ async function checkout() {
 .category-strip button.active { border-color: var(--brand); color: #fff; background: var(--brand); }
 .pos-keys {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: minmax(152px, auto);
+    grid-auto-rows: minmax(168px, auto);
     align-content: start;
     flex: 1;
     min-height: 0;
@@ -433,18 +716,35 @@ async function checkout() {
 }
 .pos-keys button {
     position: relative;
-    grid-template-rows: auto minmax(2.6em, auto) minmax(2.7em, auto) auto;
-    align-content: start;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     min-width: 0;
-    min-height: 152px;
+    min-height: 168px;
     padding: 13px;
     overflow: hidden;
 }
 .pos-keys button strong,
-.pos-keys button small { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
-.pos-keys button b { align-self: end; margin-top: auto; }
+.pos-keys button small {
+    display: block;
+    flex: 0 0 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+}
+.pos-keys button b {
+    display: block;
+    flex: 0 0 auto;
+    width: 100%;
+    margin-top: auto;
+    padding-top: 7px;
+    color: var(--brand);
+    font-size: .95rem;
+    line-height: 1.25;
+    white-space: nowrap;
+}
 .pos-keys button:hover:not(:disabled) { border-color: #91bca2; background: #f4faf6; }
-.product-tile-category { color: var(--muted); font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.product-tile-category { flex: 0 0 auto; color: var(--muted); font-size: .64rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .product-empty { grid-column: 1 / -1; }
 .sale-ticket { display: flex; flex-direction: column; min-width: 0; }
 .ticket-head { padding: 17px 20px; }
@@ -471,7 +771,121 @@ async function checkout() {
 .tender-grid button { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-weight: 750; }
 .tender-grid button.active { border-color: var(--brand); color: var(--brand); background: var(--soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .tender-note { color: var(--muted); line-height: 1.4; }
+.cash-tender-entry {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) auto minmax(145px, auto);
+    align-items: end;
+    gap: .5rem;
+}
+.cash-tender-entry label {
+    display: grid;
+    gap: .25rem;
+    color: var(--muted);
+    font-size: .72rem;
+    font-weight: 750;
+}
+.money-input {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    min-height: 38px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+}
+.money-input:focus-within {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 2px rgba(23, 120, 74, .12);
+}
+.money-input b {
+    padding-left: .7rem;
+    color: var(--brand);
+}
+.money-input input {
+    width: 100%;
+    min-height: 36px;
+    border: 0;
+    border-radius: 0;
+    text-align: right;
+    box-shadow: none;
+}
+.change-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .65rem;
+    min-height: 38px;
+    padding: .45rem .7rem;
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--soft);
+    font-size: .76rem;
+    font-weight: 700;
+}
+.change-preview strong {
+    color: var(--brand);
+    white-space: nowrap;
+}
+.receipt-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .45rem .75rem;
+    color: var(--muted);
+    font-size: .7rem;
+}
+.receipt-auto-print,
+.receipt-paper {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    font-weight: 700;
+}
+.receipt-auto-print input {
+    width: 16px;
+    min-height: 16px;
+    accent-color: var(--brand);
+}
+.receipt-paper select {
+    width: auto;
+    min-height: 30px;
+    padding: .25rem 1.8rem .25rem .55rem;
+    font-size: .72rem;
+}
 @media (min-width: 1241px) {
+    .pos-page.pos-focus-active {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100dvh;
+        min-height: 0;
+        padding: max(14px, env(safe-area-inset-top)) 14px 14px;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+    .pos-page.pos-focus-active > .page-header,
+    .pos-page.pos-focus-active > .notice {
+        flex: 0 0 auto;
+    }
+    .pos-page.pos-focus-active > .notice {
+        margin-bottom: 8px;
+        padding-block: 8px;
+    }
+    .pos-page.pos-focus-active .pos-workstation {
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .pos-page.pos-focus-active .product-library,
+    .pos-page.pos-focus-active .sale-ticket {
+        height: 100%;
+        min-height: 0;
+        max-height: none;
+        margin-bottom: 0;
+        overflow: hidden;
+    }
     .pos-page.cashier-pos {
         display: flex;
         flex-direction: column;
@@ -536,6 +950,10 @@ async function checkout() {
     .cashier-pos .tender-note {
         grid-column: 1 / -1;
     }
+    .cashier-pos .cash-tender-entry,
+    .cashier-pos .receipt-controls {
+        grid-column: 1 / -1;
+    }
     .cashier-pos .checkout {
         width: calc(100% - 28px);
         margin-inline: 14px;
@@ -564,12 +982,12 @@ async function checkout() {
         padding: 0.38rem 0.62rem;
     }
     .cashier-pos .pos-keys {
-        grid-auto-rows: minmax(116px, auto);
+        grid-auto-rows: minmax(148px, auto);
         gap: 7px;
         padding: 9px;
     }
     .cashier-pos .pos-keys button {
-        min-height: 116px;
+        min-height: 148px;
         padding: 10px;
     }
     .cashier-pos .ticket-head {
@@ -616,6 +1034,20 @@ async function checkout() {
     .cashier-pos .tender-grid button {
         min-height: 32px;
     }
+    .cashier-pos .cash-tender-entry {
+        grid-template-columns: minmax(160px, 1fr) auto minmax(135px, auto);
+    }
+    .cashier-pos .money-input,
+    .cashier-pos .change-preview {
+        min-height: 32px;
+    }
+    .cashier-pos .money-input input {
+        min-height: 30px;
+        padding-block: .3rem;
+    }
+    .cashier-pos .receipt-controls {
+        min-height: 30px;
+    }
     .cashier-pos .checkout {
         min-height: 38px;
         margin-top: 8px;
@@ -623,6 +1055,9 @@ async function checkout() {
     }
 }
 @media (max-width: 1240px) {
+    .cashier-fullscreen-button {
+        display: none;
+    }
     .pos-mobile-tabs {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -681,6 +1116,8 @@ async function checkout() {
     .ticket-line { grid-template-columns: minmax(0, 1fr); }
     .ticket-line > b { text-align: left; }
     .tender-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .cash-tender-entry { grid-template-columns: minmax(0, 1fr) auto; }
+    .change-preview { grid-column: 1 / -1; }
 }
 @media (max-width: 430px) {
     .pos-keys { grid-template-columns: 1fr; }

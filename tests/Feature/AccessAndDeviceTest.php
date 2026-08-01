@@ -84,7 +84,8 @@ class AccessAndDeviceTest extends TestCase
         DB::table('statutory_rates')->insert([
             'code' => 'sss',
             'effective_from' => today(),
-            'rules' => json_encode(['employee_rate' => .10, 'min_credit' => 5000, 'max_credit' => 35000]),
+            'status' => 'approved',
+            'rules' => json_encode(['employee_rate' => .10, 'min_credit' => 5000, 'max_credit' => 35000, 'credit_step' => 500]),
             'created_at' => now(),
             'updated_at' => now(),
         ]);

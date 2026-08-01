@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import axios from 'axios';
 import PageHeader from '../components/PageHeader.vue';
 import { useAuthStore } from '../stores/auth';
@@ -11,13 +11,21 @@ const syncMessage = ref('');
 const showPasswords = ref(false);
 const sync = ref(null);
 const syncing = ref(false);
-const darkMode = ref(false);
-
-function applyTheme() {
-    document.documentElement.dataset.theme = darkMode.value ? 'dark' : 'light';
-    localStorage.setItem('nenial-theme', darkMode.value ? 'dark' : 'light');
-    window.dispatchEvent(new CustomEvent('nenial-theme-change', { detail: darkMode.value }));
-}
+const conflicts = ref([]);
+const resolvingConflict = ref(null);
+const maintenance = ref(null);
+const maintenanceBusy = ref(false);
+const maintenanceMessage = ref('');
+const showMaintenanceDialog = ref(false);
+const showMaintenancePassword = ref(false);
+const maintenanceDialog = ref(null);
+const maintenanceLaunch = ref(null);
+const maintenanceForm = reactive({
+    enabled: false,
+    message: 'We are currently performing scheduled maintenance. Please check back shortly.',
+    current_password: '',
+    confirmation: '',
+});
 
 async function save() {
     try {
@@ -33,8 +41,23 @@ async function loadSync() {
     if (!['admin', 'assistant'].includes(auth.role)) return;
     try {
         sync.value = (await axios.get('/api/local-sync/status')).data;
+        await loadConflicts();
     } catch {
         sync.value = null;
+        conflicts.value = [];
+    }
+}
+
+async function loadConflicts() {
+    if (auth.role !== 'admin' || !sync.value?.enabled) {
+        conflicts.value = [];
+        return;
+    }
+
+    try {
+        conflicts.value = (await axios.get('/api/local-sync/conflicts')).data.data || [];
+    } catch {
+        conflicts.value = [];
     }
 }
 
@@ -44,6 +67,7 @@ async function runSync() {
     try {
         sync.value = (await axios.post('/api/local-sync/run')).data;
         syncMessage.value = sync.value?.message || '';
+        await loadConflicts();
     } catch (error) {
         syncMessage.value = error.response?.data?.message || error.response?.data?.sync?.message || 'Cloud synchronization failed.';
         await loadSync();
@@ -52,33 +76,138 @@ async function runSync() {
     }
 }
 
+async function resolveConflict(conflict, action) {
+    if (
+        action === 'accept_remote' &&
+        !confirm('Keep the cloud version and discard this store-local change? This cannot be undone.')
+    ) {
+        return;
+    }
+
+    resolvingConflict.value = conflict.id;
+    syncMessage.value = '';
+    try {
+        await axios.post(`/api/local-sync/conflicts/${conflict.id}/resolve`, {
+            action,
+        });
+        sync.value = (await axios.post('/api/local-sync/run')).data;
+        await loadConflicts();
+        syncMessage.value = sync.value?.online
+            ? action === 'retry'
+                ? 'The local change was retried and synchronization completed.'
+                : 'The conflict was resolved and the cloud version was applied locally.'
+            : sync.value?.message || 'The conflict was resolved, but synchronization is still offline.';
+    } catch (error) {
+        syncMessage.value =
+            error.response?.data?.message ||
+            'The synchronization conflict could not be resolved.';
+    } finally {
+        resolvingConflict.value = null;
+    }
+}
+
+async function loadMaintenance() {
+    if (auth.role !== 'admin') return;
+    try {
+        maintenance.value = (await axios.get('/api/system/status')).data;
+    } catch {
+        maintenance.value = null;
+    }
+}
+
+function maintenanceChanged(event) {
+    maintenance.value = event.detail;
+}
+
+function openMaintenanceDialog(enabled) {
+    maintenanceMessage.value = '';
+    showMaintenancePassword.value = false;
+    Object.assign(maintenanceForm, {
+        enabled,
+        message: maintenance.value?.message || 'We are currently performing scheduled maintenance. Please check back shortly.',
+        current_password: '',
+        confirmation: '',
+    });
+    showMaintenanceDialog.value = true;
+    nextTick(() => {
+        const initialControl = maintenanceDialog.value?.querySelector(
+            enabled ? 'textarea' : 'input[autocomplete="current-password"]',
+        );
+        initialControl?.focus();
+    });
+}
+
+function closeMaintenanceDialog(force = false) {
+    if (maintenanceBusy.value && !force) return;
+    showMaintenanceDialog.value = false;
+    showMaintenancePassword.value = false;
+    nextTick(() => maintenanceLaunch.value?.focus());
+}
+
+function handleMaintenanceDialogKeydown(event) {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMaintenanceDialog();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = [...maintenanceDialog.value.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href]',
+    )].filter((element) => element.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+async function saveMaintenance() {
+    maintenanceBusy.value = true;
+    maintenanceMessage.value = '';
+    try {
+        const { data } = await axios.put('/api/admin/maintenance', maintenanceForm);
+        maintenance.value = data.maintenance;
+        maintenanceMessage.value = data.message;
+        window.dispatchEvent(new CustomEvent('nenial:maintenance-changed', {
+            detail: data.maintenance,
+        }));
+        closeMaintenanceDialog(true);
+    } catch (error) {
+        maintenanceMessage.value =
+            error.response?.data?.message ||
+            Object.values(error.response?.data?.errors || {})[0]?.[0] ||
+            'Unable to change maintenance mode.';
+    } finally {
+        maintenanceBusy.value = false;
+    }
+}
+
 onMounted(() => {
-    darkMode.value = document.documentElement.dataset.theme === 'dark';
-    loadSync();
+    window.addEventListener('nenial:maintenance-changed', maintenanceChanged);
+    return Promise.all([loadSync(), loadMaintenance()]);
+});
+onBeforeUnmount(() => {
+    window.removeEventListener('nenial:maintenance-changed', maintenanceChanged);
 });
 </script>
 
 <template>
-    <PageHeader title="Settings" subtitle="Account security and store connectivity">
-        <label class="theme-toggle">
-            <input v-model="darkMode" type="checkbox" @change="applyTheme">
-            <span class="theme-switch" aria-hidden="true"><i></i></span>
-            <span>{{ darkMode ? 'Dark mode' : 'Light mode' }}</span>
-        </label>
-    </PageHeader>
+    <PageHeader title="Settings" subtitle="Account security and store connectivity" />
     <p v-if="auth.user.must_change_password" class="notice">An administrator issued a temporary password. Change it now before continuing normal work.</p>
     <div class="two-col">
         <section class="panel profile">
-            <div class="settings-section-title"><span class="settings-icon" aria-hidden="true">●</span><h2>Profile</h2></div>
             <img src="/media/Nenial.jpg">
-            <h3>{{ auth.user.name }}</h3><p>{{ auth.user.email }}</p>
-            <div class="profile-details">
-                <div><span class="profile-detail-icon" aria-hidden="true">▣</span><span>Role</span><strong>{{ auth.user.role === 'admin' ? 'Administrator' : auth.user.role }}</strong></div>
-                <div><span class="profile-detail-icon" aria-hidden="true">◇</span><span>Account status</span><b>Active</b></div>
-            </div>
+            <h2>{{ auth.user.name }}</h2><p>{{ auth.user.email }}</p><span class="tag">{{ auth.user.role }}</span>
         </section>
         <form class="panel stack" @submit.prevent="save">
-            <div class="panel-head settings-form-head"><div><span class="settings-icon" aria-hidden="true">▣</span><h2>Change password</h2></div></div>
+            <div class="panel-head"><h2>Change password</h2></div>
             <label>Current password<input v-model="form.current_password" :type="showPasswords ? 'text' : 'password'" autocomplete="current-password" required></label>
             <label>New password<input v-model="form.password" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" minlength="8" required></label>
             <label>Confirm new password<input v-model="form.password_confirmation" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" required></label>
@@ -89,27 +218,141 @@ onMounted(() => {
         </form>
     </div>
 
+    <section v-if="auth.role === 'admin' && maintenance" class="panel maintenance-control" :class="{ active: maintenance.enabled }">
+        <div class="panel-head">
+            <div>
+                <span class="maintenance-kicker">Website availability</span>
+                <h2>Maintenance mode</h2>
+                <small>Temporarily block customer and staff access while keeping administrator recovery, synchronization, payment webhooks, and registered attendance devices available.</small>
+            </div>
+            <span class="tag" :class="{ warn: maintenance.enabled }">{{ maintenance.enabled ? 'Maintenance active' : 'Website online' }}</span>
+        </div>
+        <div class="maintenance-control-body">
+            <div>
+                <strong>{{ maintenance.enabled ? 'Only administrators can access the application.' : 'The website is available normally.' }}</strong>
+                <p>{{ maintenance.message }}</p>
+                <small v-if="maintenance.updated_at">Last changed {{ new Date(maintenance.updated_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }) }}</small>
+            </div>
+            <button
+                ref="maintenanceLaunch"
+                class="btn"
+                :class="maintenance.enabled ? 'primary' : 'danger'"
+                type="button"
+                @click="openMaintenanceDialog(!maintenance.enabled)"
+            >
+                {{ maintenance.enabled ? 'Restore website access' : 'Start maintenance' }}
+            </button>
+        </div>
+        <p v-if="maintenanceMessage" class="notice" role="status">{{ maintenanceMessage }}</p>
+    </section>
+
     <section v-if="sync" class="panel sync-panel">
-        <div class="panel-head settings-sync-head"><div><span class="settings-icon" aria-hidden="true">♧</span><span><h2>Store synchronization</h2><small>{{ sync.enabled ? `Local node: ${sync.node_id}` : 'Cloud deployment' }}</small></span></div><span class="tag" :class="{ warn: sync.conflicts || !sync.online }">{{ sync.enabled ? (sync.online ? 'Connected' : 'Offline') : 'Cloud mode' }}</span></div>
+        <div class="panel-head"><div><h2>Store synchronization</h2><small>{{ sync.enabled ? `Local node: ${sync.node_id}` : 'Cloud deployment' }}</small></div><span class="tag" :class="{ warn: sync.conflicts || !sync.online }">{{ sync.enabled ? (sync.online ? 'Connected' : 'Offline') : 'Cloud mode' }}</span></div>
         <div class="sync-grid">
-            <div><i class="sync-icon" aria-hidden="true">◷</i><span><small>Pending events</small><strong>{{ sync.pending }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">△</i><span><small>Open conflicts</small><strong>{{ sync.conflicts }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">♙</i><span><small>Accounts & workforce</small><strong>{{ sync.accounts_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">▤</i><span><small>Devices</small><strong>{{ sync.devices_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">◉</i><span><small>Face enrollments</small><strong>{{ sync.face_enrollments_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">◇</i><span><small>Inventory activity</small><strong>{{ sync.activity_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">✓</i><span><small>Order fulfillment</small><strong>{{ sync.orders_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">◷</i><span><small>Attendance</small><strong>{{ sync.attendance_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">▧</i><span><small>Payroll snapshots</small><strong>{{ sync.payroll_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></span></div>
-            <div><i class="sync-icon" aria-hidden="true">☁</i><span><small>Last synchronized</small><strong>{{ sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Not yet' }}</strong></span></div>
+            <div><span>Pending events</span><strong>{{ sync.pending }}</strong></div>
+            <div><span>Open conflicts</span><strong>{{ sync.conflicts }}</strong></div>
+            <div><span>Accounts & workforce</span><strong>{{ sync.accounts_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Devices</span><strong>{{ sync.devices_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Face enrollments</span><strong>{{ sync.face_enrollments_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Inventory activity</span><strong>{{ sync.activity_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Order fulfillment</span><strong>{{ sync.orders_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Attendance</span><strong>{{ sync.attendance_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Payroll snapshots</span><strong>{{ sync.payroll_synced ? 'Synchronized' : 'Awaiting cloud update' }}</strong></div>
+            <div><span>Payroll standards</span><strong>{{ sync.statutory_rates_synced ? 'Synchronized' : (sync.enabled ? 'Awaiting cloud update' : 'Cloud source') }}</strong></div>
+            <div><span>Last synchronized</span><strong>{{ sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }) : 'Not yet' }}</strong></div>
             <button v-if="sync.enabled" class="btn primary" :disabled="syncing" @click="runSync">{{ syncing ? 'Synchronizing…' : 'Synchronize now' }}</button>
         </div>
         <p v-if="syncMessage || sync.message" class="notice">{{ syncMessage || sync.message }}</p>
     </section>
-</template>
 
-<style scoped>
-.theme-toggle { display: flex; align-items: center; justify-content: flex-end; gap: .65rem; width: max-content; color: var(--ink); font-size: .82rem; white-space: nowrap; cursor: pointer; }.theme-toggle input { position: absolute; width: 1px; min-height: 1px; opacity: 0; }.theme-switch { position: relative; width: 44px; height: 24px; border-radius: 999px; background: #bdcbc2; transition: background .18s; }.theme-switch i { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); transition: transform .18s; }.theme-toggle input:checked + .theme-switch { background: var(--brand); }.theme-toggle input:checked + .theme-switch i { transform: translateX(20px); }.theme-toggle input:focus-visible + .theme-switch { outline: 3px solid rgba(23,107,67,.25); outline-offset: 3px; }
-.settings-section-title,.settings-form-head>div,.settings-sync-head>div{display:flex;align-items:center;gap:.7rem}.settings-section-title{width:100%;margin-bottom:16px;align-self:start}.settings-section-title h2{margin:0;font-size:1rem}.settings-icon{display:grid;width:38px;height:38px;place-items:center;border-radius:10px;color:var(--brand);background:#e5f4eb;font-size:1.05rem;font-weight:850}.profile h3{margin:14px 0 4px;font-size:1.15rem}.profile-details{display:grid;gap:14px;width:100%;margin-top:20px;padding-top:20px;border-top:1px solid var(--line);text-align:left}.profile-details>div{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:9px;font-size:.82rem}.profile-detail-icon{display:grid;width:22px;height:22px;place-items:center;color:var(--brand);font-style:normal;font-weight:850}.profile-details strong{font-size:.82rem;font-weight:700;text-transform:capitalize}.profile-details b{padding:.3rem .55rem;border-radius:999px;color:#12623b;background:#e4f5ea;font-size:.72rem}.settings-form-head{padding:0 0 14px;background:transparent!important}.settings-form-head h2{margin:0}.settings-sync-head>div>span:last-child{display:grid;gap:3px}.settings-sync-head h2{margin:0}.settings-sync-head small{color:var(--muted)}.sync-panel .sync-grid{grid-template-columns:repeat(5,minmax(0,1fr))!important;grid-auto-rows:112px}.sync-grid>div{display:flex!important;align-items:center;gap:11px;height:112px;padding:15px 13px;border:1px solid #e1ece5;border-radius:10px;background:#fcfefd}.sync-grid>div>span{display:grid;gap:4px}.sync-grid>div small{color:var(--muted);font-size:.71rem}.sync-icon{display:grid;flex:0 0 35px;width:35px;height:35px;place-items:center;border-radius:10px;color:var(--brand);background:#e7f5ec;font-size:1rem;font-style:normal;font-weight:850}.sync-grid>div strong{font-size:.82rem}@media(max-width:1100px){.sync-panel .sync-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}@media(max-width:700px){.sync-panel .sync-grid{grid-template-columns:1fr!important;grid-auto-rows:auto}.sync-grid>div{height:auto;min-height:88px}}
-:global(html[data-theme="dark"]) .sync-panel{border-color:#365a46!important;background:linear-gradient(145deg,#142f22,#10271c)!important;box-shadow:0 20px 44px rgba(0,0,0,.22)!important}:global(html[data-theme="dark"]) .sync-panel .panel-head{border-color:#365a46!important;background:linear-gradient(90deg,#193927,#163222)!important}:global(html[data-theme="dark"]) .sync-panel .settings-icon{color:#8ce6ae;background:#244c35}:global(html[data-theme="dark"]) .sync-panel .sync-grid>div{border-color:#355b45;background:linear-gradient(145deg,#1c392a,#193425);box-shadow:inset 0 1px rgba(255,255,255,.025)}:global(html[data-theme="dark"]) .sync-panel .sync-grid>div small{color:#acc9b7}:global(html[data-theme="dark"]) .sync-panel .sync-grid>div strong{color:#edf8f0}:global(html[data-theme="dark"]) .sync-panel .sync-icon{color:#8ce6ae;background:#28533a}:global(html[data-theme="dark"]) .sync-panel .tag{color:#b9efca;background:#25563b}
-</style>
+    <section v-if="conflicts.length" class="panel sync-conflicts">
+        <div class="panel-head">
+            <div>
+                <h2>Synchronization conflicts</h2>
+                <small>Review store-local changes that could not be applied safely to the cloud.</small>
+            </div>
+            <span class="tag warn">{{ conflicts.length }} open</span>
+        </div>
+        <div class="sync-conflict-list">
+            <article v-for="conflict in conflicts" :key="conflict.id" class="sync-conflict">
+                <div>
+                    <strong>{{ conflict.event_type.replaceAll('.', ' ') }}</strong>
+                    <p>{{ conflict.reason }}</p>
+                    <small>{{ new Date(conflict.created_at).toLocaleString('en-US', { timeZone: 'Asia/Manila' }) }}</small>
+                </div>
+                <div class="actions">
+                    <button
+                        v-if="conflict.can_retry"
+                        class="btn"
+                        type="button"
+                        :disabled="resolvingConflict === conflict.id"
+                        @click="resolveConflict(conflict, 'retry')"
+                    >
+                        Retry local change
+                    </button>
+                    <button
+                        class="btn danger"
+                        type="button"
+                        :disabled="resolvingConflict === conflict.id"
+                        @click="resolveConflict(conflict, 'accept_remote')"
+                    >
+                        Keep cloud version
+                    </button>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <div
+        v-if="showMaintenanceDialog"
+        class="modal"
+        @click.self="closeMaintenanceDialog()"
+        @keydown="handleMaintenanceDialogKeydown"
+    >
+        <form
+            ref="maintenanceDialog"
+            class="modal-card maintenance-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="maintenance-dialog-title"
+            @submit.prevent="saveMaintenance"
+        >
+            <div class="panel-head">
+                <div>
+                    <span class="maintenance-kicker">Administrator confirmation</span>
+                    <h2 id="maintenance-dialog-title">{{ maintenanceForm.enabled ? 'Start website maintenance' : 'Restore website access' }}</h2>
+                </div>
+                <button type="button" class="btn ghost" :disabled="maintenanceBusy" @click="closeMaintenanceDialog()">Close</button>
+            </div>
+            <p :class="maintenanceForm.enabled ? 'maintenance-warning' : 'notice'">
+                {{ maintenanceForm.enabled
+                    ? 'Customers, assistants, cashiers, and ordinary users will be signed out or blocked immediately. You will retain administrator access.'
+                    : 'This will reopen the storefront and staff workspaces immediately.' }}
+            </p>
+            <label v-if="maintenanceForm.enabled">Public maintenance message
+                <textarea v-model="maintenanceForm.message" rows="3" maxlength="240" required></textarea>
+            </label>
+            <label>Administrator password
+                <span class="password-field">
+                    <input v-model="maintenanceForm.current_password" :type="showMaintenancePassword ? 'text' : 'password'" autocomplete="current-password" required>
+                    <button
+                        class="password-eye"
+                        type="button"
+                        :aria-label="showMaintenancePassword ? 'Hide administrator password' : 'Show administrator password'"
+                        :aria-pressed="showMaintenancePassword"
+                        @click="showMaintenancePassword = !showMaintenancePassword"
+                    >
+                        {{ showMaintenancePassword ? 'Hide' : 'Show' }}
+                    </button>
+                </span>
+            </label>
+            <label>Type <strong>{{ maintenanceForm.enabled ? 'START MAINTENANCE' : 'RESTORE WEBSITE' }}</strong>
+                <input v-model="maintenanceForm.confirmation" autocomplete="off" required>
+            </label>
+            <p v-if="maintenanceMessage" class="error" role="alert">{{ maintenanceMessage }}</p>
+            <button class="btn full" :class="maintenanceForm.enabled ? 'danger' : 'primary'" :disabled="maintenanceBusy">
+                {{ maintenanceBusy ? 'Applying…' : maintenanceForm.enabled ? 'Confirm maintenance shutdown' : 'Confirm website restoration' }}
+            </button>
+        </form>
+    </div>
+</template>
