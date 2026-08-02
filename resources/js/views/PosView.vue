@@ -16,6 +16,9 @@ const message = ref("");
 const busy = ref(false);
 const saleDiscountPercent = ref(0);
 const paymentMethod = ref("cash");
+const cashReceived = ref("");
+const printReceiptAutomatically = ref(true);
+const receiptPaperSize = ref("80 mm");
 const mobilePanel = ref("products");
 const posRoot = ref(null);
 const isFullscreen = ref(false);
@@ -85,11 +88,28 @@ const totalDiscount = computed(() => discount.value + saleDiscount.value);
 const total = computed(() => subtotal.value - totalDiscount.value);
 const vatable = computed(() => total.value / (1 + VAT_RATE));
 const vat = computed(() => total.value - vatable.value);
+const changeDue = computed(() =>
+    Math.max(0, (Number(cashReceived.value) || 0) - total.value),
+);
 const money = (value) =>
     Number(value).toLocaleString("en-PH", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     });
+const productTone = (category) =>
+    `product-tile--${String(category || "general")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")}`;
+const categoryTone = (category) => productTone(category).replace("product-tile--", "category-tone--");
+const productIcon = (category) =>
+    ({
+        Aggregates: "⛰",
+        Materials: "ϟ",
+        Finishing: "▤",
+        Tools: "⚒",
+        Safety: "⛑",
+    })[category] || "◼";
 
 onMounted(async () => {
     document.addEventListener("keydown", captureScannerKey, true);
@@ -223,7 +243,12 @@ function clearTicket() {
     if (!cart.value.length || confirm("Clear every item from this sale?")) {
         cart.value = [];
         saleDiscountPercent.value = 0;
+        cashReceived.value = "";
     }
+}
+
+function setExactCash() {
+    cashReceived.value = total.value.toFixed(2);
 }
 
 async function checkout() {
@@ -242,6 +267,7 @@ async function checkout() {
         cart.value = [];
         saleDiscountPercent.value = 0;
         paymentMethod.value = "cash";
+        cashReceived.value = "";
         mobilePanel.value = "products";
         checkoutKey = crypto.randomUUID();
         await inventory.load();
@@ -353,7 +379,7 @@ async function checkout() {
                 <button
                     v-for="category in categories"
                     :key="category"
-                    :class="{ active: selectedCategory === category }"
+                    :class="[categoryTone(category), { active: selectedCategory === category }]"
                     @click="selectedCategory = category"
                 >
                     {{ category }}
@@ -363,10 +389,14 @@ async function checkout() {
                 <button
                     v-for="product in products"
                     :key="product.id"
+                    :class="productTone(product.category)"
                     :disabled="!product.available_quantity"
                     @click="add(product)"
                 >
-                    <span class="product-tile-category">{{ product.category }}</span>
+                    <span class="product-tile-top">
+                        <span class="product-tile-icon" aria-hidden="true">{{ productIcon(product.category) }}</span>
+                        <span class="product-tile-category">{{ product.category }}</span>
+                    </span>
                     <strong>{{ product.name }}</strong>
                     <small
                         >{{ product.sku }} · {{ product.available_quantity }}
@@ -489,6 +519,49 @@ async function checkout() {
                     </button>
                 </div>
                 <small v-if="paymentMethod !== 'cash'" class="tender-note">Confirm approval on the connected payment terminal before completing the sale.</small>
+            </div>
+            <div class="payment-details">
+                <label class="cash-received">
+                    <span>Cash received</span>
+                    <span class="money-input">
+                        <span>₱</span>
+                        <input
+                            v-model.number="cashReceived"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputmode="decimal"
+                            aria-label="Cash received"
+                        />
+                    </span>
+                </label>
+                <button
+                    class="exact-cash"
+                    type="button"
+                    :disabled="!cart.length"
+                    @click="setExactCash"
+                >
+                    Exact cash
+                </button>
+                <div class="change-due">
+                    <span>Change</span><b>₱{{ money(changeDue) }}</b>
+                </div>
+            </div>
+            <div class="receipt-options">
+                <label class="receipt-toggle">
+                    <input
+                        v-model="printReceiptAutomatically"
+                        type="checkbox"
+                    />
+                    <span>Print receipt automatically</span>
+                </label>
+                <label class="paper-size">
+                    <span>Paper</span>
+                    <select v-model="receiptPaperSize">
+                        <option>80 mm</option>
+                        <option>58 mm</option>
+                    </select>
+                </label>
             </div>
             <button
                 class="btn primary full checkout"
@@ -634,6 +707,335 @@ async function checkout() {
 .tender-grid button { min-height: 38px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; font-weight: 750; }
 .tender-grid button.active { border-color: var(--brand); color: var(--brand); background: var(--soft); box-shadow: inset 0 0 0 1px var(--brand); }
 .tender-note { color: var(--muted); line-height: 1.4; }
+.cashier-pos .product-library,
+.cashier-pos .sale-ticket {
+    border: 1px solid #dbe7df;
+    border-radius: 18px;
+    box-shadow: 0 16px 38px rgba(18, 64, 42, .1);
+}
+.cashier-pos .product-library { background: rgba(255, 255, 255, .92); }
+.cashier-pos .pos-panel-head {
+    min-height: 66px;
+    padding: 14px 16px;
+    border-bottom: 1px solid #e4eee8;
+    background: linear-gradient(135deg, #fbfefc, #eff8f2);
+}
+.cashier-pos .pos-panel-head h2 { color: #123c29; font-size: 1.05rem; }
+.cashier-pos .register-state {
+    display: inline-flex;
+    align-items: center;
+    gap: .38rem;
+    border: 1px solid #b8ddc5;
+    color: #17623d;
+    background: #eaf8ef;
+}
+.cashier-pos .register-state::before {
+    width: .48rem;
+    height: .48rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 4px rgba(23, 98, 61, .1);
+    content: "";
+}
+.cashier-pos .pos-scanner {
+    margin: 10px 12px 8px;
+    padding: 10px;
+    border: 1px solid #d8e7dd;
+    border-radius: 13px;
+    background: #f7fbf8;
+}
+.cashier-pos .pos-scanner input,
+.cashier-pos .pos-search input {
+    border-color: #cfe0d5;
+    background: #fff;
+    box-shadow: none;
+}
+.cashier-pos .pos-scanner input:focus,
+.cashier-pos .pos-search input:focus,
+.cashier-pos .ticket-discount input:focus {
+    border-color: #278154;
+    box-shadow: 0 0 0 3px rgba(39, 129, 84, .13);
+}
+.cashier-pos .category-strip {
+    padding-bottom: 12px;
+    border-bottom: 1px solid #edf3ef;
+}
+.pos-page .category-strip button {
+    border-color: #dce8e0;
+    color: #537062;
+    background: #fbfdfc;
+    transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.pos-page .category-strip button:hover {
+    transform: translateY(-1px);
+    border-color: #9bcbb0;
+    color: #17623d;
+    background: #f0f8f3;
+    box-shadow: 0 6px 14px rgba(25, 112, 68, .12);
+}
+.pos-page .category-strip button.active {
+    border-color: transparent;
+    background: linear-gradient(135deg, #12663d, #248457);
+    box-shadow: 0 5px 12px rgba(25, 112, 68, .2);
+}
+.pos-page .category-strip button:not(.category-tone--all)::before {
+    width: .42rem;
+    height: .42rem;
+    border-radius: 50%;
+    background: var(--category-color, #668274);
+    content: "";
+}
+.pos-page .category-strip button.active { color: #fff; font-weight: 800; }
+.pos-page .category-strip .category-tone--aggregates { --category-color: #C07A1E; }
+.pos-page .category-strip .category-tone--materials { --category-color: #3D6FA8; }
+.pos-page .category-strip .category-tone--finishing { --category-color: #8A5A3C; }
+.pos-page .category-strip .category-tone--tools { --category-color: #B8452F; }
+.pos-page .category-strip .category-tone--safety { --category-color: #C4292F; }
+.pos-page .category-strip button:not(.category-tone--all):hover {
+    border-color: var(--category-color);
+    color: var(--category-color);
+    background: color-mix(in srgb, var(--category-color) 12%, #fff);
+    box-shadow: 0 6px 14px color-mix(in srgb, var(--category-color) 18%, transparent);
+}
+.pos-page .category-strip button:not(.category-tone--all):hover::before {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--category-color) 16%, transparent);
+}
+.pos-page .category-strip button.active:hover { color: #fff; }
+.pos-page .category-strip button:not(.category-tone--all).active {
+    border-color: var(--category-color);
+    background: var(--category-color);
+    box-shadow: 0 5px 12px color-mix(in srgb, var(--category-color) 26%, transparent);
+}
+.pos-page .category-strip button:not(.category-tone--all).active::before { display: none; }
+.cashier-pos .pos-keys { gap: 11px; padding: 13px; background: #f6faf7; }
+.cashier-pos .pos-keys button {
+    --tile-color: #32825a;
+    --tile-tint: #eaf5ed;
+    border: 1px solid #dbe6df;
+    border-top: 4px solid var(--tile-color);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 3px 10px rgba(28, 75, 50, .06);
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.cashier-pos .pos-keys button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    border-color: var(--tile-color);
+    background: #fff;
+    box-shadow: 0 10px 18px rgba(25, 91, 54, .13);
+}
+.cashier-pos .pos-keys button strong { color: var(--ink); }
+.cashier-pos .pos-keys button b { color: var(--ink); font-size: 1.05rem; }
+.cashier-pos .product-tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; margin-bottom: .65rem; }
+.cashier-pos .product-tile-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    color: var(--tile-color);
+    background: var(--tile-tint);
+    font-size: 1.05rem;
+    line-height: 1;
+}
+.cashier-pos .product-tile-category {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: .24rem .5rem;
+    border-radius: 999px;
+    color: var(--tile-color);
+    background: var(--tile-tint);
+}
+.cashier-pos .pos-keys .product-tile--aggregates { --tile-color: #C07A1E; --tile-tint: #fff1dc; }
+.cashier-pos .pos-keys .product-tile--materials { --tile-color: #3D6FA8; --tile-tint: #e8f0fb; }
+.cashier-pos .pos-keys .product-tile--finishing { --tile-color: #8A5A3C; --tile-tint: #f6ebe5; }
+.cashier-pos .pos-keys .product-tile--tools { --tile-color: #B8452F; --tile-tint: #fbe9e5; }
+.cashier-pos .pos-keys .product-tile--safety { --tile-color: #C4292F; --tile-tint: #fbe8e9; }
+.cashier-pos .pos-keys button small::before {
+    display: inline-block;
+    width: .43rem;
+    height: .43rem;
+    margin: 0 .35rem .04rem 0;
+    border-radius: 50%;
+    background: var(--tile-color);
+    content: "";
+}
+.cashier-pos .sale-ticket { background: #fff; }
+.cashier-pos .ticket-head {
+    background: linear-gradient(115deg, #0c3c27, #17623d 70%, #257a50);
+    box-shadow: inset 0 -1px rgba(255, 255, 255, .12);
+}
+.cashier-pos .ticket-head small { color: #b9ddc7; font-weight: 800; letter-spacing: .08em; }
+.cashier-pos .ticket-head h2 { letter-spacing: -.02em; }
+.cashier-pos .ticket-head-actions > span {
+    padding: .35rem .55rem;
+    border-radius: 999px;
+    color: #e5f7ec;
+    background: rgba(255, 255, 255, .12);
+    font-size: .72rem;
+    font-weight: 800;
+}
+.cashier-pos .ticket-column-head { background: #f3f8f5; color: #547164; }
+.cashier-pos .ticket-empty { position: relative; padding: 42px 20px 20px; color: #698376; }
+.cashier-pos .ticket-empty::before {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: #24734a;
+    background: #e7f5eb;
+    font-size: 1.2rem;
+    content: "▤";
+    transform: translateX(-50%);
+}
+.cashier-pos .ticket-summary {
+    margin-inline: 18px;
+    padding: 13px 0;
+    border-top: 1px solid #e5eee8;
+}
+.cashier-pos .ticket-summary > span,
+.cashier-pos .ticket-discount { padding: .22rem 0; }
+.cashier-pos .ticket-discount input { border-color: #cddfd3; border-radius: 8px; background: #f7fbf8; }
+.cashier-pos .ticket-total {
+    margin-inline: 18px;
+    padding: 15px 17px;
+    border-radius: 14px;
+    color: #fff;
+    background: linear-gradient(110deg, #0d4b2f, #197146);
+    box-shadow: 0 10px 18px rgba(16, 91, 52, .2);
+}
+.cashier-pos .ticket-total strong { font-size: 1.38rem; letter-spacing: -.02em; }
+.cashier-pos .tender-section { margin: 15px 18px 0; padding-top: 13px; border-top: 1px solid #e5eee8; }
+.cashier-pos .tender-grid button {
+    min-height: 44px;
+    border-color: #d9e6de;
+    border-radius: 10px;
+    background: #fbfdfc;
+    transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.cashier-pos .tender-grid button:hover { transform: translateY(-1px); border-color: #9bcbb0; }
+.cashier-pos .tender-grid button.active {
+    border-color: #36915e;
+    color: #125d38;
+    background: #ecf8f0;
+    box-shadow: inset 0 0 0 1px #36915e, 0 3px 8px rgba(27, 112, 66, .1);
+}
+.cashier-pos .payment-details {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(132px, auto);
+    gap: 8px;
+    margin: 10px 18px 0;
+    align-items: end;
+}
+.cashier-pos .cash-received,
+.cashier-pos .receipt-toggle,
+.cashier-pos .paper-size {
+    color: #62766d;
+    font-size: .72rem;
+    font-weight: 800;
+}
+.cashier-pos .cash-received {
+    display: grid;
+    gap: 6px;
+}
+.cashier-pos .money-input {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid #d5e2da;
+    border-radius: 9px;
+    background: #fff;
+}
+.cashier-pos .money-input span {
+    color: #17623d;
+    font-weight: 900;
+}
+.cashier-pos .money-input input {
+    min-height: 38px;
+    border: 0;
+    background: transparent;
+    text-align: right;
+    font-weight: 800;
+    box-shadow: none;
+}
+.cashier-pos .money-input input:focus {
+    outline: none;
+}
+.cashier-pos .exact-cash,
+.cashier-pos .change-due {
+    min-height: 40px;
+    border-radius: 9px;
+    font-weight: 800;
+}
+.cashier-pos .exact-cash {
+    padding: 0 13px;
+    border: 1px solid #dbe6df;
+    color: #213229;
+    background: #fbfdfc;
+}
+.cashier-pos .exact-cash:hover:not(:disabled) {
+    border-color: #9bcbb0;
+    color: #17623d;
+    background: #f0f8f3;
+}
+.cashier-pos .change-due {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 14px;
+    color: #6a7e74;
+    background: #e4f2eb;
+}
+.cashier-pos .change-due b {
+    color: #1e8655;
+    white-space: nowrap;
+}
+.cashier-pos .receipt-options {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 10px 18px 0;
+}
+.cashier-pos .receipt-toggle,
+.cashier-pos .paper-size {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+.cashier-pos .receipt-toggle input {
+    width: 16px;
+    height: 16px;
+    accent-color: #248457;
+}
+.cashier-pos .paper-size select {
+    min-height: 34px;
+    min-width: 98px;
+    padding: 0 10px;
+    border: 1px solid #bfd7c9;
+    border-radius: 9px;
+    color: #213229;
+    background: #f8fcfa;
+    font-weight: 800;
+}
+.cashier-pos .checkout {
+    min-height: 50px;
+    margin-top: 14px;
+    border: 0;
+    border-radius: 12px;
+    background: linear-gradient(110deg, #0c5b36, #1f8b57);
+    box-shadow: 0 10px 20px rgba(15, 96, 54, .2);
+    font-size: .98rem;
+    letter-spacing: .01em;
+}
+.cashier-pos .checkout:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 13px 24px rgba(15, 96, 54, .26); }
 @media (min-width: 1241px) {
     .pos-page.pos-focus-active {
         display: flex;
@@ -731,6 +1133,11 @@ async function checkout() {
     .cashier-pos .tender-note {
         grid-column: 1 / -1;
     }
+    .cashier-pos .payment-details,
+    .cashier-pos .receipt-options {
+        margin-inline: 14px;
+        margin-top: 8px;
+    }
     .cashier-pos .checkout {
         width: calc(100% - 28px);
         margin-inline: 14px;
@@ -811,6 +1218,24 @@ async function checkout() {
     .cashier-pos .tender-grid button {
         min-height: 32px;
     }
+    .cashier-pos .payment-details {
+        gap: 6px;
+        margin-top: 7px;
+    }
+    .cashier-pos .money-input,
+    .cashier-pos .exact-cash,
+    .cashier-pos .change-due {
+        min-height: 34px;
+    }
+    .cashier-pos .money-input input {
+        min-height: 32px;
+    }
+    .cashier-pos .receipt-options {
+        margin-top: 7px;
+    }
+    .cashier-pos .paper-size select {
+        min-height: 30px;
+    }
     .cashier-pos .checkout {
         min-height: 38px;
         margin-top: 8px;
@@ -879,6 +1304,13 @@ async function checkout() {
     .ticket-line { grid-template-columns: minmax(0, 1fr); }
     .ticket-line > b { text-align: left; }
     .tender-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .cashier-pos .payment-details {
+        grid-template-columns: 1fr;
+    }
+    .cashier-pos .receipt-options {
+        align-items: flex-start;
+        flex-direction: column;
+    }
 }
 @media (max-width: 430px) {
     .pos-keys { grid-template-columns: 1fr; }

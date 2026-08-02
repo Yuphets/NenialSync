@@ -100,13 +100,16 @@ html,body,#app{overflow-x:clip}
 }
 
 /* Dedicated cashier POS workspace. */
-.cashier-shell{min-height:100vh;background:#eef3f0}
-.cashier-topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:1.25rem;min-height:72px;padding:10px clamp(16px,2.5vw,36px);border-bottom:1px solid #cbdad1;color:#fff;background:linear-gradient(110deg,#092f1e,#125f3b);box-shadow:0 8px 24px rgba(7,42,25,.16)}
+.cashier-shell{min-height:100vh;background:radial-gradient(circle at 0 0,#f9fdf9 0,#eef5f0 38%,#e7f0ea 100%)}
+.cashier-topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:1.25rem;min-height:72px;padding:10px clamp(16px,2.5vw,36px);border-bottom:1px solid rgba(202,225,210,.42);color:#fff;background:linear-gradient(112deg,#082d1d,#105b38 62%,#1a7449);box-shadow:0 9px 26px rgba(7,42,25,.2)}
 .cashier-topbar .brand small{color:#bdd8c7}
 .cashier-session{display:flex;align-items:center;justify-content:flex-end;gap:.65rem}
 .cashier-session>span{display:grid;min-width:150px;margin-right:.35rem;text-align:right}
 .cashier-session small{color:#bdd8c7;font-size:.68rem}
-.cashier-session .btn{min-height:38px;color:#fff;border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.06)}
+.cashier-session .btn{min-height:38px;color:#fff;border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.08);transition:background .16s ease,border-color .16s ease,transform .16s ease}
+.cashier-session .btn:hover{border-color:rgba(255,255,255,.56);background:rgba(255,255,255,.17);transform:translateY(-1px)}
+.cashier-session .settings-icon-btn{width:auto;min-height:0;padding:0;border:0;background:transparent;font-size:1.25rem;line-height:1}
+.cashier-session .settings-icon-btn:hover{background:transparent;box-shadow:none}
 .cashier-workspace{min-width:0;padding:clamp(14px,2vw,28px)}
 .cashier-workspace .page-header{margin-bottom:16px}
 .cashier-workspace .pos-layout{max-width:1800px}

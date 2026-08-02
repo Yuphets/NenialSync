@@ -100,7 +100,14 @@ onBeforeUnmount(() =>
             </RouterLink>
             <div class="cashier-session">
                 <span><small>Signed in as</small><strong>{{ auth.user.name }}</strong></span>
-                <RouterLink class="btn ghost" to="/app/settings">Settings</RouterLink>
+                <RouterLink
+                    class="btn ghost settings-icon-btn"
+                    to="/app/settings"
+                    title="Settings"
+                    aria-label="Settings"
+                >
+                    <span aria-hidden="true">&#9881;</span>
+                </RouterLink>
                 <button class="btn ghost" @click="logout">Sign out</button>
             </div>
         </header>
