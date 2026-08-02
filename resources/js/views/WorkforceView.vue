@@ -332,19 +332,19 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
         ><div class="actions">
             <input v-model="search" class="workforce-search" type="search" placeholder="Search employee, ID, or job" aria-label="Search workforce">
             <button
-                class="btn ghost"
+                class="btn ghost workforce-tab"
                 :class="{ active: tab === 'payroll' }"
                 @click="tab = 'payroll'"
             >
                 Payroll</button
             ><button
-                class="btn ghost"
+                class="btn ghost workforce-tab"
                 :class="{ active: tab === 'attendance' }"
                 @click="tab = 'attendance'"
             >
                 Attendance</button
             ><button class="btn primary" @click="show = true">
-                Add employee
+                <span aria-hidden="true">+</span> Add employee
             </button>
         </div></PageHeader
     >
@@ -644,4 +644,5 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
     .statutory-panel .panel-head .btn { width: 100%; }
     .statutory-grid { padding: 12px; }
 }
+.workforce-tab.active{color:var(--dark)!important;border-color:#a8d8b8!important;background:linear-gradient(135deg,#f0fbf3 0%,#c4ecd2 52%,#9bd8b1 100%)!important;box-shadow:0 5px 14px rgba(23,107,67,.12)}
 </style>
