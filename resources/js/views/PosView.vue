@@ -114,6 +114,23 @@ const money = (value) =>
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     });
+const productTone = (category) =>
+    `product-tile--${String(category || "general")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")}`;
+const categoryTone = (category) =>
+    category === "All"
+        ? "category-tone--all"
+        : productTone(category).replace("product-tile--", "category-tone--");
+const productIcon = (category) =>
+    ({
+        Aggregates: "◆",
+        Materials: "▦",
+        Finishing: "▤",
+        Tools: "⚒",
+        Safety: "⛑",
+    })[category] || "◼";
 
 onMounted(async () => {
     document.addEventListener("keydown", captureScannerKey, true);
@@ -435,7 +452,10 @@ async function checkout() {
                 <button
                     v-for="category in categories"
                     :key="category"
-                    :class="{ active: selectedCategory === category }"
+                    :class="[
+                        categoryTone(category),
+                        { active: selectedCategory === category },
+                    ]"
                     @click="selectedCategory = category"
                 >
                     {{ category }}
@@ -445,10 +465,14 @@ async function checkout() {
                 <button
                     v-for="product in products"
                     :key="product.id"
+                    :class="productTone(product.category)"
                     :disabled="!product.available_quantity"
                     @click="add(product)"
                 >
-                    <span class="product-tile-category">{{ product.category }}</span>
+                    <span class="product-tile-top">
+                        <span class="product-tile-icon" aria-hidden="true">{{ productIcon(product.category) }}</span>
+                        <span class="product-tile-category">{{ product.category }}</span>
+                    </span>
                     <strong>{{ product.name }}</strong>
                     <small
                         >{{ product.sku }} · {{ product.available_quantity }}
@@ -852,6 +876,181 @@ async function checkout() {
     min-height: 30px;
     padding: .25rem 1.8rem .25rem .55rem;
     font-size: .72rem;
+}
+
+/* Cashier branch presentation layer. These selectors intentionally leave the
+   scanner, checkout, payment, and receipt behavior above unchanged. */
+.cashier-pos .product-library,
+.cashier-pos .sale-ticket {
+    border: 1px solid #dbe7df;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 16px 38px rgba(18, 64, 42, .1);
+}
+.cashier-pos .pos-panel-head {
+    min-height: 66px;
+    padding: 14px 16px;
+    border-bottom-color: #e4eee8;
+    background: linear-gradient(135deg, #fbfefc, #eff8f2);
+}
+.cashier-pos .pos-panel-head h2 { color: #123c29; font-size: 1.05rem; }
+.cashier-pos .register-state {
+    display: inline-flex;
+    align-items: center;
+    gap: .38rem;
+    border: 1px solid #b8ddc5;
+    color: #17623d;
+    background: #eaf8ef;
+}
+.cashier-pos .register-state::before {
+    width: .48rem;
+    height: .48rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 4px rgba(23, 98, 61, .1);
+    content: "";
+}
+.cashier-pos .pos-scanner {
+    margin: 10px 12px 8px;
+    padding: 10px;
+    border: 1px solid #d8e7dd;
+    border-radius: 13px;
+    background: #f7fbf8;
+}
+.cashier-pos .pos-scanner input,
+.cashier-pos .pos-search input {
+    border-color: #cfe0d5;
+    background: #fff;
+    box-shadow: none;
+}
+.cashier-pos .pos-scanner input:focus,
+.cashier-pos .pos-search input:focus,
+.cashier-pos .ticket-discount input:focus {
+    border-color: #278154;
+    box-shadow: 0 0 0 3px rgba(39, 129, 84, .13);
+}
+.cashier-pos .category-strip { padding-bottom: 12px; border-bottom: 1px solid #edf3ef; }
+.cashier-pos .category-strip button {
+    --category-color: #668274;
+    display: inline-flex;
+    align-items: center;
+    gap: .38rem;
+    border-color: #dce8e0;
+    color: #537062;
+    background: #fbfdfc;
+    transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.cashier-pos .category-strip button:not(.category-tone--all)::before {
+    width: .42rem;
+    height: .42rem;
+    border-radius: 50%;
+    background: var(--category-color);
+    content: "";
+}
+.cashier-pos .category-strip button:hover { transform: translateY(-1px); border-color: var(--category-color); }
+.cashier-pos .category-strip button.active {
+    border-color: var(--category-color);
+    color: #fff;
+    background: var(--category-color);
+    box-shadow: 0 5px 12px rgba(25, 112, 68, .2);
+}
+.cashier-pos .category-strip button.active::before { display: none; }
+.cashier-pos .category-tone--aggregates { --category-color: #b66c14; }
+.cashier-pos .category-tone--materials { --category-color: #356b9f; }
+.cashier-pos .category-tone--finishing { --category-color: #81543a; }
+.cashier-pos .category-tone--tools { --category-color: #ad402d; }
+.cashier-pos .category-tone--safety { --category-color: #b9252b; }
+.cashier-pos .category-tone--all { --category-color: #176f45; }
+.cashier-pos .pos-keys { gap: 11px; padding: 13px; background: #f6faf7; }
+.cashier-pos .pos-keys button {
+    --tile-color: #32825a;
+    --tile-tint: #eaf5ed;
+    border: 1px solid #dbe6df;
+    border-top: 4px solid var(--tile-color);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 3px 10px rgba(28, 75, 50, .06);
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.cashier-pos .pos-keys button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    border-color: var(--tile-color);
+    background: #fff;
+    box-shadow: 0 10px 18px rgba(25, 91, 54, .13);
+}
+.cashier-pos .product-tile-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: .5rem;
+    margin-bottom: .65rem;
+}
+.cashier-pos .product-tile-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    color: var(--tile-color);
+    background: var(--tile-tint);
+    font-size: 1.05rem;
+}
+.cashier-pos .product-tile-category {
+    padding: .24rem .5rem;
+    border-radius: 999px;
+    color: var(--tile-color);
+    background: var(--tile-tint);
+}
+.cashier-pos .product-tile--aggregates { --tile-color: #b66c14; --tile-tint: #fff1dc; }
+.cashier-pos .product-tile--materials { --tile-color: #356b9f; --tile-tint: #e8f0fb; }
+.cashier-pos .product-tile--finishing { --tile-color: #81543a; --tile-tint: #f6ebe5; }
+.cashier-pos .product-tile--tools { --tile-color: #ad402d; --tile-tint: #fbe9e5; }
+.cashier-pos .product-tile--safety { --tile-color: #b9252b; --tile-tint: #fbe8e9; }
+.cashier-pos .sale-ticket { background: #fff; }
+.cashier-pos .ticket-head {
+    background: linear-gradient(115deg, #0c3c27, #17623d 70%, #257a50);
+    box-shadow: inset 0 -1px rgba(255, 255, 255, .12);
+}
+.cashier-pos .ticket-head small { color: #b9ddc7; font-weight: 800; letter-spacing: .08em; }
+.cashier-pos .ticket-head-actions > span {
+    padding: .35rem .55rem;
+    border-radius: 999px;
+    color: #e5f7ec;
+    background: rgba(255, 255, 255, .12);
+    font-size: .72rem;
+    font-weight: 800;
+}
+.cashier-pos .ticket-column-head { color: #547164; background: #f3f8f5; }
+.cashier-pos .ticket-summary { margin-inline: 18px; padding: 13px 0; border-top: 1px solid #e5eee8; }
+.cashier-pos .ticket-total {
+    margin-inline: 18px;
+    padding: 15px 17px;
+    border-radius: 14px;
+    color: #fff;
+    background: linear-gradient(110deg, #0d4b2f, #197146);
+    box-shadow: 0 10px 18px rgba(16, 91, 52, .2);
+}
+.cashier-pos .ticket-total strong { font-size: 1.38rem; }
+.cashier-pos .tender-grid button { min-height: 44px; border-color: #d9e6de; border-radius: 10px; background: #fbfdfc; }
+.cashier-pos .tender-grid button.active {
+    border-color: #36915e;
+    color: #125d38;
+    background: #ecf8f0;
+    box-shadow: inset 0 0 0 1px #36915e, 0 3px 8px rgba(27, 112, 66, .1);
+}
+.cashier-pos .cash-tender-entry { margin-top: 2px; }
+.cashier-pos .money-input { border-color: #d5e2da; border-radius: 9px; }
+.cashier-pos .change-preview { border-radius: 9px; background: #e4f2eb; }
+.cashier-pos .receipt-controls { padding-top: 2px; }
+.cashier-pos .checkout {
+    min-height: 50px;
+    margin-top: 14px;
+    border: 0;
+    border-radius: 12px;
+    background: linear-gradient(110deg, #0c5b36, #1f8b57);
+    box-shadow: 0 10px 20px rgba(15, 96, 54, .2);
+    font-size: .98rem;
 }
 @media (min-width: 1241px) {
     .pos-page.pos-focus-active {
