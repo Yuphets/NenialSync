@@ -9,6 +9,20 @@ axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 axios.defaults.headers.common['X-CSRF-TOKEN'] = document.querySelector('meta[name="csrf-token"]')?.content;
 axios.defaults.withCredentials = true;
 
+const themeStorageKey = 'nenial.theme.v1';
+
+function applySavedTheme() {
+    let savedTheme = 'light';
+    try {
+        savedTheme = localStorage.getItem(themeStorageKey) === 'dark' ? 'dark' : 'light';
+    } catch {
+        // The default light theme remains available when storage is blocked.
+    }
+    document.documentElement.dataset.theme = savedTheme;
+}
+
+applySavedTheme();
+
 let maintenanceRedirectPending = false;
 const maintenanceExemptPath = () =>
     ['/login', '/maintenance', '/face-terminal'].some((path) =>

@@ -229,12 +229,12 @@ async function downloadBackup() {
     <PageHeader
         title="Company reports"
         subtitle="Sales, orders, attendance, payroll, workforce, and inventory in one report"
-        ><div class="actions"><button class="btn" @click="csv">Download report CSV</button><button v-if="auth.role === 'admin'" class="btn primary" @click="showBackup = true">Backup all company data</button></div></PageHeader
+        ><div class="actions report-actions"><button class="btn report-action" @click="csv">Download report CSV</button><button v-if="auth.role === 'admin'" class="btn primary report-action" @click="showBackup = true">Backup all company data</button></div></PageHeader
     >
     <section class="panel filters report-period-filter">
         <label>From<input v-model="from" type="date" /></label
         ><label>To<input v-model="to" type="date" /></label
-        ><button class="btn primary" @click="load">Apply period</button>
+        ><button class="btn primary report-period-button" @click="load">Apply period</button>
     </section>
     <div class="stat-grid report-stats">
         <article class="stat">
@@ -345,7 +345,7 @@ async function downloadBackup() {
             <label>Search payroll<input v-model="payrollSearch" placeholder="Reference, approver, period, amount" /></label>
             <label>Finalized from<input v-model="payrollFrom" type="date" /></label>
             <label>Finalized to<input v-model="payrollTo" type="date" /></label>
-            <button v-if="payrollSearch || payrollFrom || payrollTo" class="btn" @click="payrollSearch = ''; payrollFrom = ''; payrollTo = ''">Clear payroll filters</button>
+            <button v-if="payrollSearch || payrollFrom || payrollTo" class="btn report-clear" @click="payrollSearch = ''; payrollFrom = ''; payrollTo = ''">Clear payroll filters</button>
             <small>{{ filteredPayrollRuns.length }} of {{ data.payroll?.runs?.length || 0 }} snapshots shown</small>
         </div>
         <TablePager
@@ -401,7 +401,7 @@ async function downloadBackup() {
             <label>Search inventory<input v-model="inventorySearch" placeholder="Product, SKU, category, supplier" /></label>
             <label>Updated from<input v-model="inventoryFrom" type="date" /></label>
             <label>Updated to<input v-model="inventoryTo" type="date" /></label>
-            <button v-if="inventorySearch || inventoryFrom || inventoryTo" class="btn" @click="inventorySearch = ''; inventoryFrom = ''; inventoryTo = ''">Clear inventory filters</button>
+            <button v-if="inventorySearch || inventoryFrom || inventoryTo" class="btn report-clear" @click="inventorySearch = ''; inventoryFrom = ''; inventoryTo = ''">Clear inventory filters</button>
             <small>{{ filteredInventoryStats.length }} of {{ data.inventory?.length || 0 }} products shown</small>
         </div>
         <TablePager
@@ -445,3 +445,10 @@ async function downloadBackup() {
     </section>
     <div v-if="showBackup" class="modal"><form class="modal-card" @submit.prevent="downloadBackup"><div class="panel-head"><div><h2>Company data backup</h2><small>Protected JSON export of operational records</small></div><button type="button" class="btn ghost" @click="showBackup = false">Close</button></div><p>The backup excludes passwords, tokens, OAuth identifiers, and facial descriptors. Store the downloaded file securely.</p><label>Your administrator password<input v-model="backupPassword" type="password" autocomplete="current-password" required></label><p v-if="backupError" class="error">{{ backupError }}</p><button class="btn primary full" :disabled="backupBusy">{{ backupBusy ? 'Preparing backup…' : 'Authorize and download backup' }}</button></form></div>
 </template>
+
+<style scoped>
+.report-actions{gap:8px}.report-action,.report-period-button,.report-clear{transition:background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease}.report-action:hover,.report-period-button:hover,.report-clear:hover{transform:translateY(-1px);box-shadow:0 6px 15px rgba(18,55,36,.1)}.report-action:active,.report-period-button:active,.report-clear:active{transform:translateY(0);box-shadow:none}.report-action:not(.primary):hover{color:var(--brand);border-color:#a9d3b8;background:#f2faf5}.report-action.primary:hover,.report-period-button:hover{border-color:#0e5f39;background:linear-gradient(135deg,#176b43,#0d8a50)}.report-period-button{min-width:118px}.report-clear:hover{color:var(--brand);border-color:#a9d3b8;background:#f2faf5}.report-stats .stat{transition:transform .16s ease,box-shadow .16s ease}.report-stats .stat:hover{transform:translateY(-2px);box-shadow:0 20px 42px rgba(18,55,36,.13)}
+.report-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.report-stats .stat{position:relative;min-height:132px;padding:18px 18px 18px 68px;border:1px solid #d5e9dc;border-top:3px solid var(--brand);background:linear-gradient(145deg,#fff 18%,#eef8f2);box-shadow:0 12px 28px rgba(13,50,33,.13),0 2px 6px rgba(13,50,33,.05)!important}.report-stats .stat::before{position:absolute;top:18px;left:18px;display:grid;width:34px;height:34px;place-items:center;border-radius:10px;color:var(--brand);background:#dff2e6;font-size:1.15rem;font-weight:800;box-shadow:inset 0 0 0 1px rgba(23,107,67,.06)}.report-stats .stat:nth-child(1)::before{content:"↗";color:#fff;background:var(--brand)}.report-stats .stat:nth-child(2)::before{content:"◌"}.report-stats .stat:nth-child(3)::before{content:"◷"}.report-stats .stat:nth-child(4)::before{content:"▤"}.report-stats .stat:nth-child(5)::before{content:"▥"}.report-stats .stat:nth-child(6)::before{content:"♧"}.report-stats .stat>span{font-size:.78rem}.report-stats .stat>strong{font-size:clamp(1.45rem,2.1vw,1.9rem);letter-spacing:-.04em}.report-stats .stat>small{line-height:1.35}.report-stats .stat:hover{transform:translateY(-2px);box-shadow:0 18px 34px rgba(13,50,33,.16),0 3px 8px rgba(13,50,33,.06)!important}
+@media(max-width:1050px){.report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.report-stats{grid-template-columns:1fr}.report-stats .stat{min-height:112px}}
+html[data-theme="dark"] .report-action:not(.primary):hover,html[data-theme="dark"] .report-clear:hover{color:#ccebd7;border-color:#4b8763;background:#203e2e}html[data-theme="dark"] .report-stats .stat{border-color:var(--line);background:linear-gradient(145deg,#193124,#162b20)}
+</style>
