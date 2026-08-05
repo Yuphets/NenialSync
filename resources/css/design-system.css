@@ -159,14 +159,18 @@ body {
 .sidebar-collapsed .sidebar nav a { padding-inline: 8px; }
 
 .workspace {
-    width: 100%;
+    /* The fixed desktop sidebar already occupies horizontal space. Keeping
+       this at 100% made the page sidebar-width pixels wider than the viewport. */
+    width: auto;
     max-width: none;
+    min-width: 0;
     min-height: 100vh;
     padding: clamp(20px, 2.4vw, 34px);
+    overflow-x: clip;
     color: var(--ink);
     background: var(--page);
 }
-.workspace > * { width: 100%; max-width: none; }
+.workspace > * { width: 100%; max-width: 100%; min-width: 0; }
 
 /* Shared typography and surfaces ------------------------------------- */
 .page-header {
@@ -175,6 +179,8 @@ body {
     max-width: none;
     margin-bottom: 18px;
 }
+.page-header > div { min-width: 0; }
+.page-header > .actions { flex: 0 1 auto; min-width: 0; }
 .page-header h1 {
     color: var(--ink);
     font-size: clamp(1.65rem, 2.4vw, 2.15rem);
@@ -565,8 +571,9 @@ html[data-theme="dark"] .pos-page .product-tile-icon { filter: saturate(.85) bri
 
 /* Responsive behavior ------------------------------------------------- */
 @media (max-width: 1180px) {
-    .shell { grid-template-columns: 220px minmax(0, 1fr); }
-    .workspace { padding: 22px; }
+    .shell { --sidebar-width: 220px; grid-template-columns: 220px minmax(0, 1fr); }
+    .shell.sidebar-collapsed { --sidebar-width: 76px; }
+    .workspace { padding: 20px; }
     th, td { padding-inline: 12px; }
     td .actions { flex-wrap: wrap; }
 }
@@ -590,7 +597,7 @@ html[data-theme="dark"] .pos-page .product-tile-icon { filter: saturate(.85) bri
     .sidebar nav { margin: 0; }
     .sidebar nav a { min-height: 40px; padding: 8px 10px; }
     .sidebar-collapsed .sidebar .nav-label { display: inline; }
-    .workspace { min-height: calc(100vh - 64px); }
+    .workspace { width: 100%; min-height: calc(100vh - 64px); margin-left: 0; }
 }
 
 @media (max-width: 900px) {

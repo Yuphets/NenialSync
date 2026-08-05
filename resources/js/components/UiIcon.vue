@@ -51,6 +51,8 @@ defineProps({
         </template>
         <template v-else-if="name === 'chevron-left'"><path d="m15 18-6-6 6-6"/></template>
         <template v-else-if="name === 'chevron-right'"><path d="m9 18 6-6-6-6"/></template>
+        <template v-else-if="name === 'fullscreen'"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/></template>
+        <template v-else-if="name === 'minimize'"><path d="M8 8H3M8 8V3M16 8h5M16 8V3M16 16h5M16 16v5M8 16H3M8 16v5"/></template>
         <template v-else-if="name === 'eye'"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></template>
         <template v-else-if="name === 'eye-off'"><path d="m3 3 18 18M10.6 6.2A8.6 8.6 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-2.1 2.8M6.6 6.6C4 8.3 2.5 12 2.5 12s3.5 6 9.5 6a9 9 0 0 0 4-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/></template>
         <template v-else-if="name === 'profile'"><circle cx="12" cy="8" r="3.5"/><path d="M5 21c.7-4.3 3-6.5 7-6.5s6.3 2.2 7 6.5"/></template>

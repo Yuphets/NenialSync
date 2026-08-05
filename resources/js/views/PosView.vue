@@ -382,6 +382,7 @@ async function checkout() {
                 "
                 @click="toggleFullscreen"
             >
+                <UiIcon :name="isFullscreen ? 'minimize' : 'fullscreen'" :size="18" />
                 {{ isFullscreen ? "Exit fullscreen" : "Fullscreen POS" }}
             </button>
         </div></PageHeader
@@ -424,6 +425,7 @@ async function checkout() {
                         "
                         @click="toggleFullscreen"
                     >
+                        <UiIcon :name="isFullscreen ? 'minimize' : 'fullscreen'" :size="16" />
                         {{
                             isFullscreen
                                 ? "Exit fullscreen"
@@ -666,7 +668,8 @@ async function checkout() {
 
 <style scoped>
 .pos-page { min-width: 0; box-sizing: border-box; }
-.pos-header-actions { align-items: center; }
+.pos-header-actions { align-items: center; flex-wrap: wrap; }
+.pos-header-actions .btn { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; }
 .pos-panel-actions {
     display: flex;
     align-items: center;
@@ -674,6 +677,9 @@ async function checkout() {
     gap: .45rem;
 }
 .cashier-fullscreen-button {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
     min-height: 32px;
     padding: .35rem .65rem;
     color: var(--brand);
