@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
 import TablePager from "../components/TablePager.vue";
+import UiIcon from "../components/UiIcon.vue";
 import { useAuthStore } from "../stores/auth";
 import { downloadPayrollWorkbook } from "../utils/payrollWorkbook";
 
@@ -344,7 +345,7 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
             >
                 Attendance</button
             ><button class="btn primary" @click="show = true">
-                <span aria-hidden="true">+</span> Add employee
+                <UiIcon name="plus" :size="17" /> Add employee
             </button>
         </div></PageHeader
     >

@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
+import UiIcon from "../components/UiIcon.vue";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -263,9 +264,11 @@ onBeforeUnmount(() => {
                                         ? 'Hide password'
                                         : 'Show password'
                                 "
+                                :aria-pressed="showPassword"
+                                :title="showPassword ? 'Hide password' : 'Show password'"
                                 @click="showPassword = !showPassword"
                             >
-                                {{ showPassword ? "Hide" : "Show" }}
+                                <UiIcon :name="showPassword ? 'eye-off' : 'eye'" :size="18" />
                             </button>
                         </span></label
                     ><label v-if="mode === 'register'"

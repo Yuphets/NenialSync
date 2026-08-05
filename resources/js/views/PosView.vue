@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
 import PosReceipt from "../components/PosReceipt.vue";
+import UiIcon from "../components/UiIcon.vue";
 import { useAuthStore } from "../stores/auth";
 import { useInventoryStore } from "../stores/inventory";
 
@@ -125,12 +126,12 @@ const categoryTone = (category) =>
         : productTone(category).replace("product-tile--", "category-tone--");
 const productIcon = (category) =>
     ({
-        Aggregates: "◆",
-        Materials: "▦",
-        Finishing: "▤",
-        Tools: "⚒",
-        Safety: "⛑",
-    })[category] || "◼";
+        Aggregates: "inventory",
+        Materials: "package",
+        Finishing: "orders",
+        Tools: "adjust",
+        Safety: "shield",
+    })[category] || "package";
 
 onMounted(async () => {
     document.addEventListener("keydown", captureScannerKey, true);
@@ -470,7 +471,7 @@ async function checkout() {
                     @click="add(product)"
                 >
                     <span class="product-tile-top">
-                        <span class="product-tile-icon" aria-hidden="true">{{ productIcon(product.category) }}</span>
+                        <span class="product-tile-icon" aria-hidden="true"><UiIcon :name="productIcon(product.category)" :size="18" /></span>
                         <span class="product-tile-category">{{ product.category }}</span>
                     </span>
                     <strong>{{ product.name }}</strong>

@@ -11,6 +11,15 @@ axios.defaults.withCredentials = true;
 
 const themeStorageKey = 'nenial.theme.v1';
 
+function applyTheme(theme) {
+    const normalized = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = normalized;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+        'content',
+        normalized === 'dark' ? '#0d1712' : '#167247',
+    );
+}
+
 function applySavedTheme() {
     let savedTheme = 'light';
     try {
@@ -18,10 +27,14 @@ function applySavedTheme() {
     } catch {
         // The default light theme remains available when storage is blocked.
     }
-    document.documentElement.dataset.theme = savedTheme;
+    applyTheme(savedTheme);
 }
 
 applySavedTheme();
+
+window.addEventListener('nenial:theme-changed', (event) => {
+    applyTheme(event.detail?.theme);
+});
 
 let maintenanceRedirectPending = false;
 const maintenanceExemptPath = () =>

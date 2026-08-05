@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
 import TablePager from "../components/TablePager.vue";
+import UiIcon from "../components/UiIcon.vue";
 import { useAuthStore } from "../stores/auth";
 import { useInventoryStore } from "../stores/inventory";
 
@@ -66,10 +67,10 @@ const productImage = (product) => {
 </script>
 
 <template>
-    <PageHeader title="Inventory" subtitle="Exact on-hand, reserved, and sellable quantities"><button v-if="auth.role === 'admin'" class="btn primary inventory-add" @click="open()"><span aria-hidden="true" class="button-icon">+</span> Add product</button></PageHeader>
+    <PageHeader title="Inventory" subtitle="Exact on-hand, reserved, and sellable quantities"><button v-if="auth.role === 'admin'" class="btn primary inventory-add" @click="open()"><UiIcon name="plus" :size="17" /> Add product</button></PageHeader>
     <p v-if="message" class="notice">{{ message }}</p>
     <section class="panel inventory-search-panel">
-        <label class="inventory-search"><span class="sr-only">Search inventory</span><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg><input v-model="search" placeholder="Product, SKU, barcode, supplier, category"></label>
+        <label class="inventory-search"><span class="sr-only">Search inventory</span><UiIcon name="search" :size="18" /><input v-model="search" placeholder="Product, SKU, barcode, supplier, category"></label>
         <button v-if="search" class="btn tiny clear-search" @click="search = ''">Clear</button>
         <small>{{ visibleProducts.length }} of {{ inventory.products.length }} products shown</small>
     </section>
@@ -86,8 +87,8 @@ const productImage = (product) => {
                     <td data-label="Available"><strong class="available-quantity">{{ product.available_quantity }}</strong></td>
                     <td data-label="Price">₱{{ Number(product.price).toLocaleString() }}</td>
                     <td data-label="Discount"><span class="tag discount-tag" :class="{ warn: Number(product.discount_percent) > 0 }">{{ Number(product.discount_percent || 0).toLocaleString() }}%</span><small v-if="Number(product.discount_percent) > 0">Sale price ₱{{ (Number(product.price) * (1 - Number(product.discount_percent) / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 }) }}</small></td>
-                    <td data-label="Status"><span class="tag inventory-status" :class="{ warn: product.is_low_stock }"><span aria-hidden="true">{{ product.is_low_stock ? '!' : '✓' }}</span>{{ product.is_low_stock ? "Reorder" : "Healthy" }}</span></td>
-                    <td v-if="auth.role === 'admin'" data-label="Actions"><div class="actions"><button class="btn tiny inventory-action" @click="open(product)"><span aria-hidden="true">✎</span> Edit</button><button class="btn tiny inventory-action" @click="adjust(product)"><span aria-hidden="true">☷</span> Adjust</button><button class="btn tiny danger" :disabled="removingId === product.id" @click="removeProduct(product)">{{ removingId === product.id ? "Removing…" : "Remove" }}</button></div></td>
+                    <td data-label="Status"><span class="tag inventory-status" :class="{ warn: product.is_low_stock }"><UiIcon :name="product.is_low_stock ? 'clock' : 'shield'" :size="14" />{{ product.is_low_stock ? "Reorder" : "Healthy" }}</span></td>
+                    <td v-if="auth.role === 'admin'" data-label="Actions"><div class="actions"><button class="btn tiny inventory-action" @click="open(product)"><UiIcon name="edit" :size="15" /> Edit</button><button class="btn tiny inventory-action" @click="adjust(product)"><UiIcon name="adjust" :size="15" /> Adjust</button><button class="btn tiny danger" :disabled="removingId === product.id" @click="removeProduct(product)"><UiIcon name="trash" :size="15" />{{ removingId === product.id ? "Removing…" : "Remove" }}</button></div></td>
                 </tr>
                 <tr v-if="!visibleProducts.length" class="empty-row"><td :colspan="auth.role === 'admin' ? 9 : 8"><div class="empty">No products match your search.</div></td></tr>
             </tbody>

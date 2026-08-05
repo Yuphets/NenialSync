@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import axios from "axios";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
+import UiIcon from "./UiIcon.vue";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -13,15 +14,15 @@ const navigation = ref(null);
 const maintenance = ref(null);
 const links = computed(() =>
     [
-        ["Dashboard", "/app/dashboard", "▦"],
-        ["POS Terminal", "/app/pos", "▣"],
-        ["Inventory", "/app/inventory", "▤"],
-        ["Orders", "/app/orders", "▥"],
-        ["Workforce", "/app/workforce", "◉"],
-        ["Reports", "/app/reports", "▧"],
-        ["Users", "/app/users", "◉"],
-        ["Devices", "/app/devices", "⌁"],
-        ["Settings", "/app/settings", "⚙"],
+        ["Dashboard", "/app/dashboard", "dashboard"],
+        ["POS Terminal", "/app/pos", "pos"],
+        ["Inventory", "/app/inventory", "inventory"],
+        ["Orders", "/app/orders", "orders"],
+        ["Workforce", "/app/workforce", "workforce"],
+        ["Reports", "/app/reports", "reports"],
+        ["Users", "/app/users", "users"],
+        ["Devices", "/app/devices", "devices"],
+        ["Settings", "/app/settings", "settings"],
     ].filter(
         ([name]) =>
             ({
@@ -106,7 +107,7 @@ onBeforeUnmount(() =>
                     title="Settings"
                     aria-label="Settings"
                 >
-                    <span aria-hidden="true">&#9881;</span>
+                    <UiIcon name="settings" />
                 </RouterLink>
                 <button class="btn ghost" @click="logout">Sign out</button>
             </div>
@@ -141,7 +142,7 @@ onBeforeUnmount(() =>
                     "
                     @click="toggleSidebar"
                 >
-                    {{ sidebarCollapsed ? "›" : "‹" }}
+                    <UiIcon :name="sidebarCollapsed ? 'chevron-right' : 'chevron-left'" />
                 </button>
             </div>
             <div class="identity">
@@ -157,8 +158,7 @@ onBeforeUnmount(() =>
                     :title="link[0]"
                     :aria-label="link[0]"
                 >
-                    <i aria-hidden="true">{{ link[2] }}</i
-                    ><span class="nav-label">{{ link[0] }}</span>
+                    <i aria-hidden="true"><UiIcon :name="link[2]" /></i><span class="nav-label">{{ link[0] }}</span>
                 </RouterLink>
             </nav>
             <button
@@ -167,8 +167,7 @@ onBeforeUnmount(() =>
                 aria-label="Sign out"
                 @click="logout"
             >
-                <i aria-hidden="true">↪</i
-                ><span class="nav-label">Sign out</span>
+                <i aria-hidden="true"><UiIcon name="logout" /></i><span class="nav-label">Sign out</span>
             </button>
         </aside>
         <main class="workspace">

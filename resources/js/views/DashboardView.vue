@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import axios from "axios";
 import PageHeader from "../components/PageHeader.vue";
 import TablePager from "../components/TablePager.vue";
+import UiIcon from "../components/UiIcon.vue";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
@@ -68,15 +69,15 @@ onBeforeUnmount(() => window.clearInterval(refreshTimer));
                 <h2>{{ data.customer_view ? 'Everything you need, in one place.' : 'Keep your operations moving.' }}</h2>
                 <p>{{ data.customer_view ? 'Review active orders or continue exploring what is in stock.' : 'A focused view of today’s sales, orders, inventory, and team.' }}</p>
             </div>
-            <RouterLink v-if="data.customer_view" class="btn light dashboard-cta" to="/">Browse products <span aria-hidden="true">→</span></RouterLink>
+            <RouterLink v-if="data.customer_view" class="btn light dashboard-cta" to="/">Browse products <UiIcon name="arrow-right" :size="18" /></RouterLink>
             <div v-else class="dashboard-mark" aria-hidden="true"><span></span><span></span><span></span></div>
         </section>
         <div class="stat-grid dashboard-stats">
-            <article class="stat dashboard-stat"><span class="stat-icon catalog-icon" aria-hidden="true">□</span><div><span>Available catalog</span><strong>{{ data.products || 0 }}</strong><small>{{ data.customer_view ? "Live products" : "Tracked SKUs" }}</small></div></article>
-            <article class="stat dashboard-stat featured-stat"><span class="stat-icon sales-icon" aria-hidden="true">↗</span><div><span>{{ data.customer_view ? "My open orders" : "Sales today" }}</span><strong v-if="data.customer_view">{{ data.orders_pending || 0 }}</strong><strong v-else>₱{{ Number(data.sales_today || 0).toLocaleString() }}</strong><small>{{ data.customer_view ? "Preparing or in delivery" : "Completed POS transactions" }}</small></div></article>
-            <article v-if="!data.customer_view" class="stat dashboard-stat"><span class="stat-icon orders-icon" aria-hidden="true">◌</span><div><span>Open orders</span><strong>{{ data.orders_pending || 0 }}</strong><small>Reserved inventory</small></div></article>
-            <article v-if="!data.customer_view" class="stat dashboard-stat"><span class="stat-icon team-icon" aria-hidden="true">♧</span><div><span>Employees</span><strong>{{ data.employees || 0 }}</strong><small>Active workforce</small></div></article>
-            <article v-else class="stat dashboard-stat"><span class="stat-icon shop-icon" aria-hidden="true">⌂</span><div><span>Shop</span><strong>Browse</strong><small>Current inventory</small></div></article>
+            <article class="stat dashboard-stat"><span class="stat-icon catalog-icon" aria-hidden="true"><UiIcon name="catalog" /></span><div><span>Available catalog</span><strong>{{ data.products || 0 }}</strong><small>{{ data.customer_view ? "Live products" : "Tracked SKUs" }}</small></div></article>
+            <article class="stat dashboard-stat featured-stat"><span class="stat-icon sales-icon" aria-hidden="true"><UiIcon name="sales" /></span><div><span>{{ data.customer_view ? "My open orders" : "Sales today" }}</span><strong v-if="data.customer_view">{{ data.orders_pending || 0 }}</strong><strong v-else>₱{{ Number(data.sales_today || 0).toLocaleString() }}</strong><small>{{ data.customer_view ? "Preparing or in delivery" : "Completed POS transactions" }}</small></div></article>
+            <article v-if="!data.customer_view" class="stat dashboard-stat"><span class="stat-icon orders-icon" aria-hidden="true"><UiIcon name="orders" /></span><div><span>Open orders</span><strong>{{ data.orders_pending || 0 }}</strong><small>Reserved inventory</small></div></article>
+            <article v-if="!data.customer_view" class="stat dashboard-stat"><span class="stat-icon team-icon" aria-hidden="true"><UiIcon name="team" /></span><div><span>Employees</span><strong>{{ data.employees || 0 }}</strong><small>Active workforce</small></div></article>
+            <article v-else class="stat dashboard-stat"><span class="stat-icon shop-icon" aria-hidden="true"><UiIcon name="shop" /></span><div><span>Shop</span><strong>Browse</strong><small>Current inventory</small></div></article>
         </div>
     <section v-if="!data.customer_view" class="panel table-wrap dashboard-activity">
         <div class="panel-head">

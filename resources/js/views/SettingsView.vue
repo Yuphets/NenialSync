@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import axios from 'axios';
 import PageHeader from '../components/PageHeader.vue';
+import UiIcon from '../components/UiIcon.vue';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
@@ -237,7 +238,7 @@ onBeforeUnmount(() => {
     <div class="settings-topbar">
         <PageHeader title="Settings" subtitle="Manage your account, password, and system preferences." />
         <button class="settings-theme-card" type="button" role="switch" :aria-checked="darkMode" aria-label="Toggle dark mode" @click="toggleDarkMode">
-            <span class="settings-icon settings-moon" aria-hidden="true">☾</span>
+            <span class="settings-icon settings-moon" aria-hidden="true"><UiIcon name="moon" /></span>
             <span><strong>Dark mode</strong><small>Switch between light and<br>dark appearance.</small></span>
             <span class="settings-switch" :class="{ active: darkMode }" aria-hidden="true"><i></i></span>
         </button>
@@ -245,22 +246,22 @@ onBeforeUnmount(() => {
     <p v-if="auth.user.must_change_password" class="notice">An administrator issued a temporary password. Change it now before continuing normal work.</p>
     <div class="settings-grid">
         <section class="panel settings-card settings-profile">
-            <div class="settings-card-title"><span class="settings-icon" aria-hidden="true">♙</span><h2>Profile</h2></div>
+            <div class="settings-card-title"><span class="settings-icon" aria-hidden="true"><UiIcon name="profile" /></span><h2>Profile</h2></div>
             <div class="settings-profile-main">
                 <img src="/media/Nenial.jpg" alt="Nenial profile">
                 <h2>{{ auth.user.name }}</h2><p>{{ auth.user.email }}</p><span class="tag">{{ auth.user.role }}</span>
             </div>
             <div class="settings-details">
-                <div><span class="settings-detail-icon" aria-hidden="true">♙</span><span>Role</span><strong>{{ auth.user.role === 'admin' ? 'Administrator' : auth.user.role }}</strong></div>
-                <div><span class="settings-detail-icon" aria-hidden="true">◷</span><span>Account Status</span><strong class="settings-status">Active</strong></div>
-                <div><span class="settings-detail-icon" aria-hidden="true">◷</span><span>Member Since</span><strong>{{ memberSince }}</strong></div>
+                <div><span class="settings-detail-icon" aria-hidden="true"><UiIcon name="profile" /></span><span>Role</span><strong>{{ auth.user.role === 'admin' ? 'Administrator' : auth.user.role }}</strong></div>
+                <div><span class="settings-detail-icon" aria-hidden="true"><UiIcon name="status" /></span><span>Account Status</span><strong class="settings-status">Active</strong></div>
+                <div><span class="settings-detail-icon" aria-hidden="true"><UiIcon name="calendar" /></span><span>Member Since</span><strong>{{ memberSince }}</strong></div>
             </div>
         </section>
         <form class="panel settings-card settings-password" @submit.prevent="save">
-            <div class="settings-card-title"><span class="settings-icon" aria-hidden="true">♙</span><h2>Change password</h2></div>
-            <label>Current password<div class="settings-input-wrap"><input v-model="form.current_password" :type="showPasswords ? 'text' : 'password'" autocomplete="current-password" required><span aria-hidden="true">⊙</span></div></label>
-            <label>New password<div class="settings-input-wrap"><input v-model="form.password" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" minlength="8" required><span aria-hidden="true">⊙</span></div></label>
-            <label>Confirm new password<div class="settings-input-wrap"><input v-model="form.password_confirmation" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" required><span aria-hidden="true">⊙</span></div></label>
+            <div class="settings-card-title"><span class="settings-icon" aria-hidden="true"><UiIcon name="lock" /></span><h2>Change password</h2></div>
+            <label>Current password<div class="settings-input-wrap"><input v-model="form.current_password" :type="showPasswords ? 'text' : 'password'" autocomplete="current-password" required><button class="password-eye" type="button" :aria-label="showPasswords ? 'Hide passwords' : 'Show passwords'" @click="showPasswords = !showPasswords"><UiIcon :name="showPasswords ? 'eye-off' : 'eye'" /></button></div></label>
+            <label>New password<div class="settings-input-wrap"><input v-model="form.password" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" minlength="8" required><button class="password-eye" type="button" :aria-label="showPasswords ? 'Hide passwords' : 'Show passwords'" @click="showPasswords = !showPasswords"><UiIcon :name="showPasswords ? 'eye-off' : 'eye'" /></button></div></label>
+            <label>Confirm new password<div class="settings-input-wrap"><input v-model="form.password_confirmation" :type="showPasswords ? 'text' : 'password'" autocomplete="new-password" required><button class="password-eye" type="button" :aria-label="showPasswords ? 'Hide passwords' : 'Show passwords'" @click="showPasswords = !showPasswords"><UiIcon :name="showPasswords ? 'eye-off' : 'eye'" /></button></div></label>
             <label class="password-toggle settings-checkbox"><input v-model="showPasswords" type="checkbox"><span>{{ showPasswords ? 'Hide passwords' : 'Show passwords' }}</span></label>
             <small>Use at least 8 characters with uppercase, lowercase, and a number.</small>
             <p v-if="passwordMessage" class="notice">{{ passwordMessage }}</p>
@@ -271,7 +272,7 @@ onBeforeUnmount(() => {
     <section v-if="auth.role === 'admin' && maintenance" class="panel settings-wide-card maintenance-control" :class="{ active: maintenance.enabled }">
         <div class="panel-head">
             <div class="settings-section-heading">
-                <span class="settings-icon" aria-hidden="true">◎</span>
+                <span class="settings-icon" aria-hidden="true"><UiIcon name="status" /></span>
                 <div>
                 <span class="maintenance-kicker">Website availability</span>
                 <h2>Maintenance mode</h2>
@@ -300,7 +301,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-if="sync" class="panel settings-wide-card sync-panel">
-        <div class="panel-head settings-sync-head"><div class="settings-section-heading"><span class="settings-icon" aria-hidden="true">☁</span><div><h2>Store synchronization</h2><small>{{ sync.enabled ? `Local node: ${sync.node_id}` : 'Cloud deployment' }}</small></div></div><span class="tag" :class="{ warn: sync.conflicts || !sync.online }">{{ sync.enabled ? (sync.online ? 'Connected' : 'Offline') : 'Cloud mode' }}</span></div>
+        <div class="panel-head settings-sync-head"><div class="settings-section-heading"><span class="settings-icon" aria-hidden="true"><UiIcon name="sync" /></span><div><h2>Store synchronization</h2><small>{{ sync.enabled ? `Local node: ${sync.node_id}` : 'Cloud deployment' }}</small></div></div><span class="tag" :class="{ warn: sync.conflicts || !sync.online }">{{ sync.enabled ? (sync.online ? 'Connected' : 'Offline') : 'Cloud mode' }}</span></div>
         <div class="sync-grid">
             <div><span>Pending events</span><strong>{{ sync.pending }}</strong></div>
             <div><span>Open conflicts</span><strong>{{ sync.conflicts }}</strong></div>
