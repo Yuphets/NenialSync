@@ -5,6 +5,7 @@ import PageHeader from "../components/PageHeader.vue";
 import TablePager from "../components/TablePager.vue";
 import UiIcon from "../components/UiIcon.vue";
 import { useAuthStore } from "../stores/auth";
+import { downloadCompanyReportWorkbook } from "../utils/reportWorkbook";
 
 const auth = useAuthStore();
 const data = ref({});
@@ -12,6 +13,8 @@ const showBackup = ref(false);
 const backupPassword = ref("");
 const backupBusy = ref(false);
 const backupError = ref("");
+const exporting = ref(false);
+const exportError = ref("");
 const manilaDateKey = (value = new Date()) => {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return "";
@@ -126,84 +129,24 @@ async function load() {
     ).data;
 }
 onMounted(load);
-function csv() {
-    const rows = [
-        ["NENIAL COMPANY REPORT"],
-        ["From", from.value],
-        ["To", to.value],
-        [],
-        ["Sales total", data.value.sales?.total],
-        ["VATable sales", data.value.sales?.vatable_sales],
-        ["VAT collected", data.value.sales?.vat_amount],
-        ["Transactions", data.value.sales?.count],
-        ["Orders", data.value.orders_summary?.count],
-        ["Open orders", data.value.orders_summary?.pending],
-        ["Attendance records", data.value.attendance_summary?.records],
-        ["Employees represented", data.value.attendance_summary?.employees],
-        ["Active employees", data.value.employees?.active],
-        ["Finalized payroll net", data.value.payroll?.net_total],
-        ["Inventory value", data.value.inventory_summary?.value],
-        ["Low-stock products", data.value.inventory_summary?.low_stock],
-        [],
-        ["ORDER STATUS", "Count", "Value"],
-        ...(data.value.orders || []).map((row) => [
-            row.status,
-            row.count,
-            row.total,
-        ]),
-        [],
-        ["ATTENDANCE STATUS", "Count"],
-        ...(data.value.attendance || []).map((row) => [row.status, row.count]),
-        [],
-        [
-            "PAYROLL RUN",
-            "Period start",
-            "Period end",
-            "Employees",
-            "Gross",
-            "Net",
-            "Finalized",
-        ],
-        ...(data.value.payroll?.runs || []).map((run) => [
-            run.reference,
-            run.period_start,
-            run.period_end,
-            run.items_count,
-            run.gross_pay,
-            run.net_pay,
-            run.finalized_at,
-        ]),
-        [],
-        ["PRODUCT", "SKU", "On hand", "Reserved", "Available", "Value"],
-        ...filteredInventoryStats.value.map((product) => [
-            product.name,
-            product.sku,
-            product.stock_quantity,
-            product.reserved_quantity,
-            product.available_quantity,
-            product.stock_quantity * product.price,
-        ]),
-    ];
-    const blob = new Blob(
-        [
-            rows
-                .map((row) =>
-                    row
-                        .map(
-                            (value) =>
-                                `"${String(value ?? "").replaceAll('"', '""')}"`,
-                        )
-                        .join(","),
-                )
-                .join("\n"),
-        ],
-        { type: "text/csv" },
-    );
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `nenial-company-report-${from.value}-to-${to.value}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+async function downloadReport() {
+    exporting.value = true;
+    exportError.value = "";
+    try {
+        await downloadCompanyReportWorkbook(
+            data.value,
+            { from: from.value, to: to.value },
+            {
+                payrollRuns: filteredPayrollRuns.value,
+                inventory: filteredInventoryStats.value,
+            },
+        );
+    } catch (error) {
+        console.error("Company report workbook export failed", error);
+        exportError.value = "The Excel report could not be prepared. Please try again.";
+    } finally {
+        exporting.value = false;
+    }
 }
 
 async function downloadBackup() {
@@ -230,8 +173,9 @@ async function downloadBackup() {
     <PageHeader
         title="Company reports"
         subtitle="Sales, orders, attendance, payroll, workforce, and inventory in one report"
-        ><div class="actions report-actions"><button class="btn report-action" @click="csv">Download report CSV</button><button v-if="auth.role === 'admin'" class="btn primary report-action" @click="showBackup = true">Backup all company data</button></div></PageHeader
+        ><div class="actions report-actions"><button class="btn report-action" :disabled="exporting" @click="downloadReport"><UiIcon name="download" :size="16" />{{ exporting ? "Preparing report…" : "Download report Excel" }}</button><button v-if="auth.role === 'admin'" class="btn primary report-action" @click="showBackup = true">Backup all company data</button></div></PageHeader
     >
+    <p v-if="exportError" class="notice error">{{ exportError }}</p>
     <section class="panel filters report-period-filter">
         <label>From<input v-model="from" type="date" /></label
         ><label>To<input v-model="to" type="date" /></label
@@ -290,8 +234,8 @@ async function downloadBackup() {
             ><small>Current employees</small>
         </article>
     </div>
-    <div class="two-col report-columns">
-        <section class="panel table-wrap compact-table">
+    <div class="panel report-summary-panel">
+        <section class="table-wrap compact-table report-summary-section">
             <div class="panel-head"><h2>Order statistics</h2></div>
             <table>
                 <thead>
@@ -315,7 +259,7 @@ async function downloadBackup() {
                 </tbody>
             </table>
         </section>
-        <section class="panel table-wrap compact-table">
+        <section class="table-wrap compact-table report-summary-section">
             <div class="panel-head"><h2>Attendance statistics</h2></div>
             <table>
                 <thead>
@@ -456,6 +400,7 @@ async function downloadBackup() {
 <style scoped>
 .report-actions{gap:8px}.report-action,.report-period-button,.report-clear{transition:background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease,transform .16s ease}.report-action:hover,.report-period-button:hover,.report-clear:hover{transform:translateY(-1px);box-shadow:0 6px 15px rgba(18,55,36,.1)}.report-action:active,.report-period-button:active,.report-clear:active{transform:translateY(0);box-shadow:none}.report-action:not(.primary):hover{color:var(--brand);border-color:#a9d3b8;background:#f2faf5}.report-action.primary:hover,.report-period-button:hover{border-color:#0e5f39;background:linear-gradient(135deg,#176b43,#0d8a50)}.report-period-button{min-width:118px}.report-clear:hover{color:var(--brand);border-color:#a9d3b8;background:#f2faf5}.report-stats .stat{transition:transform .16s ease,box-shadow .16s ease}.report-stats .stat:hover{transform:translateY(-2px);box-shadow:0 20px 42px rgba(18,55,36,.13)}
 .report-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.report-stats .stat{position:relative;min-height:132px;padding:18px 18px 18px 68px;border:1px solid #d5e9dc;border-top:3px solid var(--brand);background:linear-gradient(145deg,#fff 18%,#eef8f2);box-shadow:0 12px 28px rgba(13,50,33,.13),0 2px 6px rgba(13,50,33,.05)!important}.report-stats .stat>span{font-size:.78rem}.report-stats .stat>strong{font-size:clamp(1.45rem,2.1vw,1.9rem);letter-spacing:-.04em}.report-stats .stat>small{line-height:1.35}.report-stats .stat:hover{transform:translateY(-2px);box-shadow:0 18px 34px rgba(13,50,33,.16),0 3px 8px rgba(13,50,33,.06)!important}
-@media(max-width:1050px){.report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.report-stats{grid-template-columns:1fr}.report-stats .stat{min-height:112px}}
+.report-summary-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0;overflow:hidden}.report-summary-section{margin:0;border:0;border-radius:0;box-shadow:none!important}.report-summary-section:first-child{border-right:1px solid var(--line)}.report-summary-section .panel-head{border-radius:0}
+@media(max-width:1050px){.report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.report-summary-panel{grid-template-columns:1fr}.report-summary-section:first-child{border-right:0;border-bottom:1px solid var(--line)}}@media(max-width:700px){.report-stats{grid-template-columns:1fr}.report-stats .stat{min-height:112px}}
 html[data-theme="dark"] .report-action:not(.primary):hover,html[data-theme="dark"] .report-clear:hover{color:#ccebd7;border-color:#4b8763;background:#203e2e}html[data-theme="dark"] .report-stats .stat{border-color:var(--line);background:linear-gradient(145deg,#193124,#162b20)}
 </style>

@@ -8,7 +8,8 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
-        "verify:payroll": "node scripts/verify-payroll-workbook.mjs"
+        "verify:payroll": "node scripts/verify-payroll-workbook.mjs",
+        "verify:reports": "node scripts/verify-report-workbook.mjs"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

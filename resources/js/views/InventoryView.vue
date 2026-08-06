@@ -13,6 +13,8 @@ const message = ref("");
 const editing = ref(null);
 const removingId = ref(null);
 const showForm = ref(false);
+const stockAdjustment = ref(0);
+const adjustmentReason = ref("");
 const search = ref("");
 const page = ref(1);
 const pageSize = ref(5);
@@ -22,20 +24,38 @@ const form = reactive({ ...empty });
 
 onMounted(async () => { await inventory.load(); inventory.start(); });
 onBeforeUnmount(() => inventory.stop());
-function open(product = null) { editing.value = product; Object.assign(form, product || empty); showForm.value = true; }
-async function save() {
-    try {
-        editing.value ? await axios.put(`/api/products/${editing.value.id}`, form) : await axios.post("/api/products", form);
-        showForm.value = false; message.value = "Product saved."; await inventory.load();
-    } catch (error) { message.value = error.response?.data?.message || "Unable to save product."; }
+function open(product = null) {
+    editing.value = product;
+    Object.assign(form, product || empty);
+    stockAdjustment.value = 0;
+    adjustmentReason.value = "";
+    showForm.value = true;
 }
-async function adjust(product) {
-    const value = prompt(`Stock change for ${product.name}. Use a negative number to deduct.`);
-    if (!value || Number(value) === 0) return;
-    const reason = prompt("Reason for adjustment:");
-    if (!reason) return;
-    try { await axios.post(`/api/products/${product.id}/adjust`, { quantity_delta: Number(value), reason }); message.value = "Stock adjusted and logged."; await inventory.load(); }
-    catch (error) { message.value = error.response?.data?.message || "Adjustment failed."; }
+async function save() {
+    const adjustment = Number(stockAdjustment.value || 0);
+    if (editing.value && adjustment !== 0 && !adjustmentReason.value.trim()) {
+        message.value = "Enter a reason for the stock adjustment.";
+        return;
+    }
+
+    try {
+        if (editing.value) {
+            await axios.put(`/api/products/${editing.value.id}`, form);
+            if (adjustment !== 0) {
+                await axios.post(`/api/products/${editing.value.id}/adjust`, {
+                    quantity_delta: adjustment,
+                    reason: adjustmentReason.value.trim(),
+                });
+            }
+        } else {
+            await axios.post("/api/products", form);
+        }
+        showForm.value = false;
+        message.value = adjustment !== 0
+            ? "Product details and stock balance updated."
+            : "Product saved.";
+        await inventory.load();
+    } catch (error) { message.value = error.response?.data?.message || "Unable to save product."; }
 }
 async function removeProduct(product) {
     const stockNote = Number(product.stock_quantity) > 0
@@ -88,11 +108,11 @@ const productImage = (product) => {
                     <td data-label="Price">₱{{ Number(product.price).toLocaleString() }}</td>
                     <td data-label="Discount"><span class="tag discount-tag" :class="{ warn: Number(product.discount_percent) > 0 }">{{ Number(product.discount_percent || 0).toLocaleString() }}%</span><small v-if="Number(product.discount_percent) > 0">Sale price ₱{{ (Number(product.price) * (1 - Number(product.discount_percent) / 100)).toLocaleString(undefined, { maximumFractionDigits: 2 }) }}</small></td>
                     <td data-label="Status"><span class="tag inventory-status" :class="{ warn: product.is_low_stock }"><UiIcon :name="product.is_low_stock ? 'clock' : 'shield'" :size="14" />{{ product.is_low_stock ? "Reorder" : "Healthy" }}</span></td>
-                    <td v-if="auth.role === 'admin'" data-label="Actions"><div class="actions"><button class="btn tiny inventory-action" @click="open(product)"><UiIcon name="edit" :size="15" /> Edit</button><button class="btn tiny inventory-action" @click="adjust(product)"><UiIcon name="adjust" :size="15" /> Adjust</button><button class="btn tiny danger" :disabled="removingId === product.id" @click="removeProduct(product)"><UiIcon name="trash" :size="15" />{{ removingId === product.id ? "Removing…" : "Remove" }}</button></div></td>
+                    <td v-if="auth.role === 'admin'" data-label="Actions"><div class="actions"><button class="btn tiny inventory-action" @click="open(product)"><UiIcon name="edit" :size="15" /> Edit</button><button class="btn tiny danger" :disabled="removingId === product.id" @click="removeProduct(product)"><UiIcon name="trash" :size="15" />{{ removingId === product.id ? "Removing…" : "Remove" }}</button></div></td>
                 </tr>
                 <tr v-if="!visibleProducts.length" class="empty-row"><td :colspan="auth.role === 'admin' ? 9 : 8"><div class="empty">No products match your search.</div></td></tr>
             </tbody>
         </table>
     </section>
-    <div v-if="showForm" class="modal"><form class="modal-card wide" @submit.prevent="save"><div class="panel-head"><h2>{{ editing ? "Edit" : "Add" }} product</h2><button type="button" class="btn ghost" @click="showForm = false">Close</button></div><div class="form-grid"><label>Name<input v-model="form.name" required></label><label>SKU<input v-model="form.sku" required></label><label>Barcode<input v-model="form.barcode" required></label><label>Category<input v-model="form.category" required></label><label>Supplier<input v-model="form.supplier"></label><label>Unit<input v-model="form.unit" required></label><label>Price<input v-model.number="form.price" type="number" min=".01" step=".01" required></label><label v-if="!editing">Opening stock<input v-model.number="form.stock_quantity" type="number" min="0"></label><label>Safety stock<input v-model.number="form.safety_stock" type="number" min="0"></label><label>Reorder level<input v-model.number="form.reorder_level" type="number" min="0"></label><label>Discount %<input v-model.number="form.discount_percent" type="number" min="0" max="100"></label></div><button class="btn primary">Save product</button></form></div>
+    <div v-if="showForm" class="modal"><form class="modal-card wide" @submit.prevent="save"><div class="panel-head"><div><h2>{{ editing ? "Edit product" : "Add product" }}</h2><small v-if="editing">Update product information and stock from one place.</small></div><button type="button" class="btn ghost" @click="showForm = false">Close</button></div><div class="form-grid"><label>Name<input v-model="form.name" required></label><label>SKU<input v-model="form.sku" required></label><label>Barcode<input v-model="form.barcode" required></label><label>Category<input v-model="form.category" required></label><label>Supplier<input v-model="form.supplier"></label><label>Unit<input v-model="form.unit" required></label><label>Price<input v-model.number="form.price" type="number" min=".01" step=".01" required></label><label v-if="!editing">Opening stock<input v-model.number="form.stock_quantity" type="number" min="0"></label><label>Safety stock<input v-model.number="form.safety_stock" type="number" min="0"></label><label>Reorder level<input v-model.number="form.reorder_level" type="number" min="0"></label><label>Discount %<input v-model.number="form.discount_percent" type="number" min="0" max="100"></label><fieldset v-if="editing" class="stock-adjustment-fields"><legend>Stock adjustment <small>Current on hand: {{ editing.stock_quantity }} {{ editing.unit }}</small></legend><label>Quantity change<input v-model.number="stockAdjustment" type="number" step="1" placeholder="Use + to add or − to deduct"></label><label>Adjustment reason<input v-model="adjustmentReason" :required="Number(stockAdjustment) !== 0" maxlength="255" placeholder="Delivery received, damaged stock, physical count…"></label><p>Leave the quantity at 0 when only editing product information. Every stock change is recorded in inventory activity.</p></fieldset></div><button class="btn primary">{{ editing ? "Save product changes" : "Add product" }}</button></form></div>
 </template>

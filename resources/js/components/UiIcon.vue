@@ -71,6 +71,7 @@ defineProps({
         <template v-else-if="name === 'trash'"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/></template>
         <template v-else-if="name === 'search'"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></template>
         <template v-else-if="name === 'arrow-right'"><path d="M5 12h14M14 7l5 5-5 5"/></template>
+        <template v-else-if="name === 'download'"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 20h14"/></template>
         <template v-else-if="name === 'catalog'"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></template>
         <template v-else-if="name === 'sales'"><path d="m4 16 5-5 4 3 7-8M15 6h5v5"/></template>
         <template v-else-if="name === 'chart'"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></template>
