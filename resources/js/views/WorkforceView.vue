@@ -629,12 +629,13 @@ onBeforeUnmount(() => window.clearInterval(attendanceTimer));
 .statutory-panel .panel-head > div { display: grid; gap: .25rem; }
 .statutory-panel .panel-head small { color: var(--muted); line-height: 1.45; }
 .statutory-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 16px 18px; }
-.statutory-grid article { display: grid; gap: .5rem; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #f9fcfa; }
+.statutory-grid article { display: grid; gap: .5rem; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--surface-soft); }
 .statutory-grid article > div { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.statutory-grid article strong, .statutory-grid article p { color: var(--ink); }
 .statutory-grid article p { margin: 0; line-height: 1.45; }
 .statutory-grid article small { color: var(--muted); }
 .statutory-grid article a { width: max-content; max-width: 100%; color: var(--brand); font-size: .76rem; font-weight: 750; overflow-wrap: anywhere; }
-.statutory-monitor { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); color: var(--muted); background: #fbfdfc; font-size: .76rem; line-height: 1.5; }
+.statutory-monitor { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); color: var(--muted); background: var(--surface-soft); font-size: .76rem; line-height: 1.5; }
 .statutory-monitor strong { color: var(--brand); }
 .statutory-monitor.warning { color: #654700; background: #fff5d8; }
 .statutory-monitor.warning strong { color: #8a5c00; }
