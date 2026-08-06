@@ -68,6 +68,27 @@ body {
     text-rendering: optimizeLegibility;
 }
 
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+}
+::view-transition-new(root) { z-index: 9999; }
+::view-transition-old(root) { z-index: 1; }
+.theme-animating,
+.theme-animating body,
+.theme-animating #app,
+.theme-animating .panel,
+.theme-animating .stat,
+.theme-animating .btn,
+.theme-animating input,
+.theme-animating select,
+.theme-animating textarea,
+.theme-animating .workspace,
+.theme-animating .settings-theme-card {
+    transition: color .3s ease, background-color .3s ease, border-color .3s ease, box-shadow .3s ease !important;
+}
+
 .ui-icon { display: block; flex: 0 0 auto; }
 
 /* Application frame --------------------------------------------------- */
@@ -431,6 +452,14 @@ td .actions .btn { white-space: nowrap; }
     border-radius: var(--radius-lg);
 }
 .auth-card h2 { color: var(--ink); font-size: 1.75rem; letter-spacing: -.04em; }
+.auth-card--leaving {
+    pointer-events: none;
+    animation: auth-card-depart .38s cubic-bezier(.22,.8,.28,1) both;
+}
+@keyframes auth-card-depart {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: .35; transform: translateY(-8px) scale(.988); }
+}
 .auth-divider::before,
 .auth-divider::after { border-color: var(--line) !important; }
 .password-field input { padding-right: 48px; }
@@ -569,6 +598,116 @@ html[data-theme="dark"] .pos-page .tender-section { color: var(--ink); backgroun
 html[data-theme="dark"] .pos-page .product-tile-category,
 html[data-theme="dark"] .pos-page .product-tile-icon { filter: saturate(.85) brightness(.88); }
 
+/* Unified operational summaries and compact tables ------------------ */
+#app .workspace .stat-grid.dashboard-stats,
+#app .workspace .stat-grid.report-stats { gap: 14px !important; }
+#app .workspace .stat-grid.dashboard-stats > .stat.dashboard-stat,
+#app .workspace .stat-grid.report-stats > .stat {
+    min-height: 136px !important;
+    padding: 18px !important;
+    border: 1px solid var(--line) !important;
+    border-radius: var(--radius) !important;
+    background: var(--surface) !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+#app .workspace .stat-grid.report-stats > .stat {
+    display: grid !important;
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+    grid-template-rows: auto auto 1fr !important;
+    column-gap: 13px !important;
+    align-content: center !important;
+}
+#app .workspace .stat-grid.report-stats > .stat > :not(.report-stat-icon) { grid-column: 2 !important; }
+#app .workspace .stat-grid.dashboard-stats > .stat.dashboard-stat {
+    display: grid !important;
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+    align-content: center !important;
+    align-items: start !important;
+    gap: 13px !important;
+}
+#app .workspace .dashboard-stats .dashboard-stat > div {
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    min-height: 40px;
+}
+#app .workspace .dashboard-stats .stat-icon,
+#app .workspace .report-stats .report-stat-icon {
+    display: grid !important;
+    width: 40px !important;
+    height: 40px !important;
+    place-items: center !important;
+    border-radius: 10px !important;
+    color: var(--brand) !important;
+    background: var(--brand-soft) !important;
+    box-shadow: none !important;
+}
+#app .workspace .dashboard-stats strong,
+#app .workspace .report-stats strong {
+    color: var(--ink) !important;
+    font-size: clamp(1.5rem, 2vw, 1.9rem) !important;
+    line-height: 1.12 !important;
+    letter-spacing: -.04em !important;
+}
+#app .workspace .dashboard-stats small,
+#app .workspace .report-stats small { color: var(--muted) !important; line-height: 1.4 !important; }
+
+#app .workspace .report-columns { align-items: stretch !important; gap: 14px !important; }
+#app .workspace .report-columns > .compact-table {
+    display: flex;
+    flex-direction: column;
+    min-height: 156px;
+    margin: 0 !important;
+    overflow: hidden;
+}
+#app .workspace .report-columns > .compact-table .panel-head {
+    flex: 0 0 57px;
+    min-height: 57px !important;
+    padding: 14px 18px !important;
+}
+#app .workspace .report-columns > .compact-table table { flex: 1; table-layout: fixed; }
+#app .workspace .report-columns > .compact-table th,
+#app .workspace .report-columns > .compact-table td { height: 47px; padding-inline: 18px; }
+#app .workspace .report-columns .empty-row td { color: var(--muted); }
+
+#app .workspace .settings-wide-card.sync-panel .sync-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+    gap: 8px !important;
+    margin: 0 !important;
+    padding: 14px !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--surface-soft) !important;
+}
+#app .workspace .settings-wide-card.sync-panel .sync-grid > div {
+    display: grid;
+    align-content: center;
+    gap: 6px;
+    min-height: 78px !important;
+    padding: 13px 14px !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 10px !important;
+    color: var(--ink);
+    background: var(--surface) !important;
+}
+#app .workspace .settings-wide-card.sync-panel .sync-grid > div span {
+    color: var(--muted);
+    font-size: .67rem;
+    font-weight: 600;
+}
+#app .workspace .settings-wide-card.sync-panel .sync-grid > div strong {
+    color: var(--ink);
+    font-size: .76rem;
+    line-height: 1.35;
+}
+#app .workspace .settings-wide-card.sync-panel .sync-grid > .btn {
+    grid-column: auto !important;
+    align-self: stretch;
+    min-height: 78px;
+    margin: 0 !important;
+}
+
 /* Responsive behavior ------------------------------------------------- */
 @media (max-width: 1180px) {
     .shell { --sidebar-width: 220px; grid-template-columns: 220px minmax(0, 1fr); }
@@ -662,6 +801,7 @@ html[data-theme="dark"] .pos-page .product-tile-icon { filter: saturate(.85) bri
     .table-wrap tbody td { grid-template-columns: minmax(88px, 35%) minmax(0, 1fr); gap: 8px; padding: 9px 10px; }
     .table-wrap tbody td .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
     .table-wrap tbody td .actions .btn { width: 100%; }
+    #app .workspace .settings-wide-card.sync-panel .sync-grid { grid-template-columns: 1fr !important; padding: 10px !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {

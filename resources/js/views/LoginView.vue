@@ -14,6 +14,7 @@ const mode = ref(
         : "login",
 );
 const busy = ref(false);
+const loginComplete = ref(false);
 const error = ref(route.query.oauth_error || "");
 const result = ref("");
 const temporaryPassword = ref("");
@@ -89,6 +90,10 @@ async function submit() {
             return;
         }
         await auth.login(form);
+        loginComplete.value = true;
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            await new Promise((resolve) => window.setTimeout(resolve, 380));
+        }
         router.push(destination());
     } catch (exception) {
         const payload = exception.response?.data;
@@ -188,7 +193,7 @@ onBeforeUnmount(() => {
                 >← Back to maintenance notice</a
             >
             <RouterLink v-else to="/" class="back">← Back to store</RouterLink>
-            <form class="auth-card" @submit.prevent="submit">
+            <form class="auth-card" :class="{ 'auth-card--leaving': loginComplete }" @submit.prevent="submit">
                 <span class="eyebrow">{{
                     maintenance.enabled
                         ? "Maintenance access"
@@ -302,7 +307,9 @@ onBeforeUnmount(() => {
                 <button class="btn primary" :disabled="busy">
                     {{
                         busy
-                            ? "Please wait…"
+                            ? loginComplete
+                                ? "Opening workspace…"
+                                : "Please wait…"
                             : mode === "login"
                               ? "Sign in"
                               : mode === "register"
